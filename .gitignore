@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+*.tsbuildinfo
+
+# Test coverage
+coverage/
+
+# Environment (API database credentials, etc.)
+.env
+.env.*
+!.env.example
+
+# Package manager debug logs. Not *.log: the recorded RSSI log is a test fixture.
+npm-debug.log*
+pnpm-debug.log*
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+
+# Claude Code personal settings
+.claude/settings.local.json
