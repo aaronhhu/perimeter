@@ -38,7 +38,7 @@ The two checks operate at different layers. `--is-connected` asks about a negoti
 This is strictly better than the connected/disconnected signal originally planned:
 
 - It's continuous rather than binary, so *we* choose the distance threshold instead of accepting Apple's disconnect timeout.
-- It's fast. Measured transition latency was a single sample, ~6 seconds.
+- It's fast *at the source*. Raw readings track movement within a single sample, ~6 seconds. The shipped detection latency is deliberately slower (~40s) because conditioning trades responsiveness for not firing on noise — see *Signal conditioning*.
 - Identity is solved by the pairing bond. The advertisements come from a rotating address, but the bond lets the Mac resolve it back to the paired iPhone, so each reading is attributed to the right device. This is why the pairing must stay — see below.
 
 ### The pairing bond is load-bearing
@@ -65,6 +65,26 @@ Two things fall out of this:
 
 **Medium and far are indistinguishable, and that's fine.** RSSI can't separate "next room" from "down the hall," but Perimeter doesn't care — both are away. The distinction it *can* make, in-room vs not-in-room, is exactly the granularity the mechanic needs.
 
+### Reading the value
+
+`system_profiler SPBluetoothDataType -json` gives structured output, so nothing here depends on scraping the human-readable text. The shape, trimmed to one device:
+
+```json
+{ "SPBluetoothDataType": [ {
+    "controller_properties": { "controller_state": "attrib_on" },
+    "device_not_connected": [
+      { "aarons iphone": { "device_address": "5C:50:D9:CF:E6:F4", "device_rssi": "-42" } }
+    ] } ] }
+```
+
+Three details that are easy to get wrong, all confirmed against live output:
+
+- **`device_rssi` is a string**, not a number. It parses to a number, but it arrives quoted.
+- **Each device is a single-key object keyed by its display name**, nested inside a per-bucket array. The iPhone appears under `device_not_connected` because iOS refuses a classic connection — but that's a fact about iOS, not a shape to depend on, so every `device_*` bucket is searched.
+- **The device is matched on its address, not its name.** Names are user-editable; the bond identity address isn't. Addresses are compared by hex digits alone, so separator and case differences don't matter.
+
+A paired device being *listed* is not the same as it being *sensed* — AirPods appear in the same bucket with no `device_rssi` at all. And Bluetooth being off is reported as `controller_state`, which also empties the device buckets, so the radio is checked first; otherwise the failure reports as the much less useful "device not found."
+
 ### Signal conditioning
 
 A single raw sample must never be allowed to change state. Stationary readings spike (a −79 was observed while sitting at the desk), and an early walking-around test produced desk and away readings that overlapped entirely. Three layers:
@@ -75,17 +95,43 @@ A single raw sample must never be allowed to change state. Stationary readings s
 
 **Thresholds are environment-specific.** The values above are calibrated to one room, one Mac, one phone. Different walls, distances, and hardware will shift them. For now they live in config; a calibration flow ("sit at your desk, now walk away") is a later problem but an inevitable one if this is ever used by anyone else.
 
+### When there's no number at all
+
+Conditioning assumes a number arrived. Separately, a poll can produce none: Bluetooth switched off, the phone genuinely gone, `system_profiler` failing or timing out, or the device listed without an RSSI.
+
+**A dropout is never fed to the filter as a substitute sample.** A missing measurement is not a weak one, and pushing a floor value (say −90) into the median would let one flaky invocation drag the smoothed value toward away — exactly the noise sensitivity the median exists to prevent. So:
+
+1. **Short dropouts are skipped.** The window keeps the samples it already had, so a one-poll glitch costs nothing on recovery.
+2. **A sustained dropout is away in its own right.** Three consecutive failures (~30s, kept under the ~40s signal-path latency so a blackout isn't a faster route to away) commit an `away` transition carrying *no* smoothed value — reporting an invented number here would disguise a sensor failure as a reading.
+3. **That path also clears the window.** Samples from before a blackout shouldn't vote on the present once readings return, so recovery rebuilds from a full fresh window.
+
 ### Where this logic lives
 
-Signal conditioning lives in the **menu bar app**, not the API. This is a deliberate carve-out from the "all logic in the API" rule below, on the grounds that it isn't business logic — it's device physics and per-machine calibration, operating at a 5–15 second sample rate. Shipping every raw sample to the server to have it averaged there would be chatty and pointless.
+Signal conditioning lives in the **menu bar app**, not the API. This is a deliberate carve-out from the "all logic in the API" rule below, on the grounds that it isn't business logic — it's device physics and per-machine calibration, operating at a 10-second sample rate. Shipping every raw sample to the server to have it averaged there would be chatty and pointless.
 
 The contract is therefore: **the menu bar app posts debounced presence transitions, not raw RSSI.** The API never sees a signal strength number except as optional debug telemetry on the event. Everything downstream of "the user left" or "the user came back" — active hours, break state, whether to notify, cooldowns — stays in the API.
 
-### Open risk
+### Module layout
 
-All measurements so far were short runs with a recently-handled phone. In real use it sits locked and untouched for hours, and iOS throttles BLE advertising when idle. If `system_profiler` reports a cached last-known value rather than a fresh measurement, the app will believe the phone is at the desk forever — a silent failure. **A 30+ minute idle test is required before building on this.** If the value flatlines, a different read path (a native CoreBluetooth helper) is needed.
+```
+apps/menu-bar/src/
+├── sampler.ts   # system_profiler → one reading, or the reason there isn't one
+├── filter.ts    # RSSI numbers → debounced presence transitions
+├── monitor.ts   # poll cadence + dropout policy → presence events
+└── index.ts     # wiring: config, logging, and where the POST to the API will go
+```
 
-Separately, `system_profiler` takes 1–2 seconds per invocation and is a heavyweight way to read one number. Acceptable at a 15s poll interval; if the interval ever needs to tighten, a small Swift helper using CoreBluetooth is the replacement.
+Each layer keeps a pure core apart from its impure edge: `parseRssi` is pure and only `readRssi` runs a process; `advance` holds the whole dropout policy and only `startMonitor` touches the clock. That's what lets the policy be tested without hardware and without waiting in real time, the same way the filter is tested against the recorded RSSI log.
+
+One cadence detail that matters: **the next poll is scheduled after the previous one completes**, not on a `setInterval`. The window size and debounce are tuned against evenly spaced samples, and a fixed interval can overlap invocations if one runs slow — which silently changes the spacing the tuning assumes.
+
+### Risks, and what testing settled
+
+**Staleness — tested, passed.** The worry was that iOS throttles BLE advertising when a phone sits locked and untouched, and that `system_profiler` might then report a cached last-known value forever — the app would believe the phone is at the desk permanently, a silent failure. The 35-minute idle run (138 samples, phone untouched) settled it: values kept updating throughout, no flatline and no drift. A native CoreBluetooth read path is therefore not needed, and stays on the shelf.
+
+**Invocation cost — measured, and ~20× cheaper than first recorded.** This document previously put `system_profiler` at 1–2 seconds per invocation. Measured on the development Mac across several runs, it is **50–75ms**, so it is not the heavyweight call it was assumed to be, and cost is no longer a reason to avoid tightening the poll interval. The constraint that remains is tuning, not cost: the window and debounce are validated against 10s spacing, so changing the interval means re-validating both.
+
+**Still open: behaviour beyond 35 minutes.** Real use is hours, not half an hour. Nothing observed so far suggests a problem, but multi-hour idle behaviour is simply unmeasured. The dropout handling above is partly insurance against that — a read path that quietly stops producing values now reads as away instead of as a phone that never leaves.
 
 ## Repo structure
 
@@ -108,8 +154,8 @@ perimeter/
 ## Core data flow (Phase 1)
 
 1. **iPhone → menu-bar app** — BLE advertisements, RSSI sampled locally via `system_profiler`.
-2. **menu-bar conditions the signal** — median smoothing, hysteresis, debounce — and derives a presence state.
-3. **menu-bar → api** — `POST` event *only on a state transition*, not every poll.
+2. **menu-bar conditions the signal** — median smoothing, hysteresis, debounce — and derives a presence state. A poll that yields no reading is skipped rather than smoothed, and a sustained run of them reads as away.
+3. **menu-bar → api** — `POST` event *only on a state transition*, not every poll. (Not wired yet: `apps/api` doesn't exist, so transitions are currently logged at the seam where the POST will go.)
 4. **api evaluates rules** — is it within active hours? is the user on a break? has a notification fired too recently? — and returns a decision (e.g. `{ notify: true }`) in the same response.
 5. **menu-bar → user** — if told to, fires a native macOS notification.
 6. **api ↔ website** — config reads/writes, leaderboard data.

@@ -43,6 +43,7 @@ Detection latency is ~40s by design. Do not "optimize" this away — it's the co
 
 ## Conventions
 
+- **Comments explain why, not what.** Don't narrate what the code does or restate an identifier in a doc comment — a reader has the code. Write one only for something the code can't show: where a tuned number came from, an approach that was tried and rejected, an empirical fact like the −69 spike. When one is warranted, keep it to a line or two.
 - **pnpm, not npm.** pnpm ignores the `workspaces` field in `package.json` and reads `pnpm-workspace.yaml`.
 - `tsconfig.base.json` holds only genuinely shared options. `target`/`lib`/`module`/`moduleResolution` belong in each app's own tsconfig — they legitimately differ (Electron main is Node, website is DOM).
 - `noUncheckedIndexedAccess` is on deliberately. The sliding-window filter indexes into a partially-filled array; this flag is what forces the startup case to be handled.
@@ -56,4 +57,4 @@ Detection latency is ~40s by design. Do not "optimize" this away — it's the co
 
 ## Working style
 
-Explain the concept and the reasoning before the code. Prefer giving code in small chunks the user types, rather than writing complete files. When there's a real tradeoff, state it plainly rather than picking silently.
+Explain the concept and the reasoning before the code. When there's a real tradeoff, state it plainly rather than picking silently.

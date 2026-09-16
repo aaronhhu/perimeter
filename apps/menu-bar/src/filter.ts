@@ -1,20 +1,14 @@
-// Turns raw RSSI samples into debounced presence transitions.
-// Median smoothing, then hysteresis, then debounce — see "Signal conditioning" in ARCHITECTURE.md.
-
 export type Presence = "present" | "away";
 
 export interface FilterConfig {
-  /** Samples in the median window. Must be odd, so the median is always a real sample. */
+  /** Must be odd, so the median is always a real sample. */
   readonly windowSize: number;
-  /** Consecutive smoothed readings past a threshold required to commit a transition. */
   readonly debounce: number;
-  /** Present → away when the smoothed RSSI drops below this (dBm). */
   readonly awayBelow: number;
-  /** Away → present when the smoothed RSSI rises above this (dBm). */
   readonly presentAbove: number;
 }
 
-/** Calibrated to one room, one Mac, one phone. Other environments will need their own values. */
+/** Calibrated to one room, one Mac, one phone. Other environments need their own values. */
 export const DEFAULT_CONFIG: FilterConfig = {
   windowSize: 5,
   debounce: 2,
@@ -23,11 +17,8 @@ export const DEFAULT_CONFIG: FilterConfig = {
 };
 
 export interface FilterState {
-  /** The most recent raw samples, oldest first, at most `windowSize` long. */
   readonly samples: readonly number[];
-  /** Null until the first state is committed. */
   readonly presence: Presence | null;
-  /** The state recent smoothed readings are arguing for, and how many in a row have done so. */
   readonly pending: { readonly presence: Presence; readonly count: number } | null;
 }
 
@@ -35,15 +26,12 @@ export const INITIAL_STATE: FilterState = { samples: [], presence: null, pending
 
 export interface Transition {
   readonly presence: Presence;
-  /** The smoothed RSSI that committed the transition, for debug telemetry. */
   readonly smoothed: number;
 }
 
 export interface StepResult {
   readonly state: FilterState;
-  /** Median of the window, or null while the window is still filling. */
   readonly smoothed: number | null;
-  /** Set only on the sample that commits a change of state. */
   readonly transition: Transition | null;
 }
 
@@ -55,7 +43,7 @@ export function step(state: FilterState, sample: number, config: FilterConfig): 
 
   const samples = [...state.samples, sample].slice(-config.windowSize);
 
-  // Startup: never judge a partial window, or the first couple of samples alone could set the state.
+  // Never judge a partial window, or the first couple of samples alone could set the state.
   if (samples.length < config.windowSize) {
     return { state: { ...state, samples }, smoothed: null, transition: null };
   }
@@ -84,7 +72,6 @@ export function step(state: FilterState, sample: number, config: FilterConfig): 
   };
 }
 
-/** Runs a recorded sequence of samples through the filter and returns every transition it commits. */
 export function replay(
   samples: readonly number[],
   config: FilterConfig = DEFAULT_CONFIG,
@@ -103,10 +90,7 @@ export function replay(
   return transitions;
 }
 
-/**
- * The state a smoothed reading argues for, or null if it doesn't argue for a change.
- * Readings in the dead zone between the two thresholds never argue for anything — that's the hysteresis.
- */
+/** Null in the dead zone between the two thresholds — that's the hysteresis. */
 function targetPresence(smoothed: number, current: Presence | null, config: FilterConfig): Presence | null {
   const argued: Presence | null =
     smoothed < config.awayBelow ? "away" : smoothed > config.presentAbove ? "present" : null;

@@ -17,14 +17,13 @@ const DESK = [-44, -43, -45, -44, -46, -42, -44, -45, -43, -44];
 const AWAY = [-74, -73, -75, -74, -76, -72, -74, -75, -73, -74];
 const DEAD_ZONE = Array<number>(20).fill(-60);
 
-// Every run starts from a fresh filter, so the first transition is always the initial state being committed.
-// The assertions are about what happens after that.
+// A fresh filter commits an initial state, so every expectation below starts with that transition.
 const presences = (samples: readonly number[]) => replay(samples).map((t) => t.presence);
 
 describe("filter", () => {
   it("ignores the -69 spike recorded with the phone untouched on the desk", () => {
-    // Settle at the desk first. From a fresh filter nothing can commit within five samples,
-    // so running the spike on its own would pass without testing anything.
+    // Settle at the desk first: nothing commits within five samples of a fresh filter, so the
+    // spike on its own would pass without testing anything.
     expect(presences([...DESK, -46, -44, -69, -45, -50])).toEqual(["present"]);
   });
 
@@ -37,7 +36,7 @@ describe("filter", () => {
     const transitions = replay([...DESK, ...AWAY]);
 
     expect(transitions.map((t) => t.presence)).toEqual(["present", "away"]);
-    // Three away samples to move the median of five, one more to satisfy the debounce of two.
+    // Three away samples move the median of five, one more satisfies the debounce of two.
     // Earlier means the debounce isn't wired in; later means the window is off.
     expect(transitions[1]?.index).toBe(DESK.length + 3);
   });
