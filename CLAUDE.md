@@ -1,6 +1,6 @@
 # Perimeter
 
-Bluetooth proximity drives a focus/accountability session: the Mac senses how close the user's iPhone is and decides whether they're at their desk. Menu bar app + Express API + React website. No companion iOS app.
+Bluetooth proximity drives a focus/accountability session: the Mac senses how close the user's iPhone is. `present`/`away` describe the **phone**, not the user — focus means the phone is away during active hours. (Planned: also require recent keyboard/mouse activity via `HIDIdleTime`, so time away from the Mac doesn't count as focus.) Menu bar app + Express API + React website. No companion iOS app.
 
 Full design rationale is in `ARCHITECTURE.md`. This file is the short list of things that are easy to get wrong.
 
@@ -29,13 +29,28 @@ Tuned parameters, validated by simulation against the real idle log (zero false 
 
 Detection latency is ~40s by design. Do not "optimize" this away — it's the cost of not firing on noise.
 
+**Stale RSSI resolved — no staleness detection needed.** Tested on both Wi-Fi and hotspot: with iPhone Bluetooth off, `system_profiler` keeps serving the last known RSSI for ~3 polls, then drops the `device_rssi` field entirely, which the sampler already reports as `rssi-absent`. A frozen value does not persist, so the planned "identical value for N consecutive polls" heuristic is unnecessary — don't build it. Cost is latency: ~30s of stale repeats, then `dropoutSamples` before the dropout path fires, so ~60s total.
+
+**`rssi-absent` is ambiguous, and that's the real loophole.** A phone out of range produces exactly the same `rssi-absent` as a phone on the desk with Bluetooth off. The symptom alone cannot tell genuine focus from gaming the session. See dropout handling below — the fix is not in the sampler.
+
 **A single raw sample must never change state.** A −69 was recorded with the phone sitting untouched on the desk, which is past the away threshold. Median smoothing plus debounce exists specifically because of that observed sample, not as a precaution.
 
 **Thresholds are environment-specific.** Calibrated to one room, one Mac, one phone. They live in config. A calibration flow is a known future need.
 
+## Dropout handling
+
+Distance is gradual, a switch is abrupt. Walking away decays the RSSI through −65 and confirms `away` *before* the signal vanishes; killing Bluetooth at the desk jumps from a strong reading straight to absent. The endpoint is ambiguous but the path into it is not, so a dropout keeps the last *verified* state:
+
+- last verified `away` → stays `away`, counts as focus
+- last verified `present` → `unknown` + "is Bluetooth off?" nudge
+
+The nudge is the enforcement, not a fallback: the one case the sensor can't resolve gets handed to the user. Known false positive — leaving fast enough to go `present` → absent without ever confirming `away` earns a spurious nudge.
+
+**Not implemented yet.** `advance` in `apps/menu-bar/src/monitor.ts` emits `away` on every sustained dropout. The `away` case is correct by accident, since `emit` suppresses a repeat of the current state; the `present` case is the loophole. Needs a third state — there is no `unknown` in `Presence`.
+
 ## Architecture rules
 
-**The menu bar app posts presence *transitions*, never raw RSSI.** The API sees `present`/`away` events, optionally with a smoothed value as debug telemetry. Edge detection happens in the filter's debounce, so the API never has to detect edges itself.
+**The menu bar app posts presence *transitions* (immediately) plus a 60s heartbeat of the current state — never raw RSSI.** The API sees `present`/`away` events, optionally with a smoothed value as debug telemetry. Edge detection happens in the filter's debounce, so the API never has to detect edges itself.
 
 **All business logic lives in the API** — active hours, break state, notification decisions, cooldowns. The one deliberate exception is signal conditioning (smoothing/hysteresis), which is device physics and per-machine calibration, not a rule, and runs at a 10s cadence.
 

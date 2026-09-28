@@ -8,7 +8,7 @@ A Bluetooth-based focus/accountability app. The core mechanic: your iPhone's pro
 |---|---|---|
 | `apps/menu-bar` | Electron + TypeScript, `system_profiler` (shelled out) | Samples BLE signal strength, conditions it into a presence state, posts *transitions* to the API, fires local macOS notifications, can open the website |
 | `apps/api` | Express + TypeScript, PostgreSQL (Drizzle ORM) | Source of truth for sessions/breaks/rules. Owns all *business* logic — the menu bar app owns only signal conditioning |
-| `apps/website` | React + TypeScript | Settings (active hours, blocked sites), pause session, leaderboard |
+| `apps/website` | React + TypeScript | Settings (schedule, blocked sites), start a manual session, take a break, leaderboard |
 | iPhone | — | No app. Its BLE advertisements, and how strongly the Mac hears them, *are* the signal. |
 
 ## The presence signal
@@ -99,10 +99,12 @@ A single raw sample must never be allowed to change state. Stationary readings s
 
 Conditioning assumes a number arrived. Separately, a poll can produce none: Bluetooth switched off, the phone genuinely gone, `system_profiler` failing or timing out, or the device listed without an RSSI.
 
+A phone with Bluetooth off and a phone out of range both end up in that last case, and neither arrives promptly: macOS repeats the last known RSSI for about three polls before it drops the field, so those readings look valid on the way down and the dropout counter starts ~30s late.
+
 **A dropout is never fed to the filter as a substitute sample.** A missing measurement is not a weak one, and pushing a floor value (say −90) into the median would let one flaky invocation drag the smoothed value toward away — exactly the noise sensitivity the median exists to prevent. So:
 
 1. **Short dropouts are skipped.** The window keeps the samples it already had, so a one-poll glitch costs nothing on recovery.
-2. **A sustained dropout is away in its own right.** Three consecutive failures (~30s, kept under the ~40s signal-path latency so a blackout isn't a faster route to away) commit an `away` transition carrying *no* smoothed value — reporting an invented number here would disguise a sensor failure as a reading.
+2. **A sustained dropout keeps the last verified state** (decided, not yet built — the current code still emits `away`). Three consecutive failures (~30s) count as a dropout. If the last verified state was `away`, nothing is emitted: the phone left and then went quiet, which is what a phone far away looks like. If it was `present`, emit `unknown` (no smoothed value) and nudge "Can't see your phone — is Bluetooth off?". Why: without an iPhone app, a phone with Bluetooth off and a phone out of range are indistinguishable from the Mac. Treating every dropout as `away` let one tap (Bluetooth off at the desk) earn focus credit; treating every dropout as `unknown` denied credit to users who put the phone genuinely far away. The remaining cheat — walk the phone far, turn Bluetooth off, bring it back — is deliberate and multi-step, which is the bar this project accepts (see Phase 2 hosts-file blocking).
 3. **That path also clears the window.** Samples from before a blackout shouldn't vote on the present once readings return, so recovery rebuilds from a full fresh window.
 
 ### Where this logic lives
@@ -127,11 +129,15 @@ One cadence detail that matters: **the next poll is scheduled after the previous
 
 ### Risks, and what testing settled
 
-**Staleness — tested, passed.** The worry was that iOS throttles BLE advertising when a phone sits locked and untouched, and that `system_profiler` might then report a cached last-known value forever — the app would believe the phone is at the desk permanently, a silent failure. The 35-minute idle run (138 samples, phone untouched) settled it: values kept updating throughout, no flatline and no drift. A native CoreBluetooth read path is therefore not needed, and stays on the shelf.
+**Staleness — settled, and no detection needed.** The worry was that `system_profiler` might report a cached last-known value forever. The 35-minute idle run (138 samples, phone untouched, Bluetooth on) showed values updating throughout: the longest run of identical consecutive values was 3 (116 singles, 8 pairs, 2 triples). Turning the iPhone's Bluetooth off does freeze the value, but not indefinitely — tested on both Wi-Fi and hotspot, macOS repeats the last RSSI for about three polls and then drops `device_rssi` entirely, which the sampler already reports as `rssi-absent`. The planned heuristic (identical value for N consecutive polls → dropout, backdated to the freeze) was therefore dropped: the existing dropout path covers it, at the cost of ~30s before the failure counter starts.
+
+What the test did surface is a different problem. `rssi-absent` is the end state for *both* Bluetooth-off and genuinely-out-of-range, so the sampler cannot tell a session being gamed from one being honoured. That ambiguity is resolved a layer up rather than in the sampler — see *When there's no number at all*, where it is the entire reason for the last-verified-state rule.
 
 **Invocation cost — measured, and ~20× cheaper than first recorded.** This document previously put `system_profiler` at 1–2 seconds per invocation. Measured on the development Mac across several runs, it is **50–75ms**, so it is not the heavyweight call it was assumed to be, and cost is no longer a reason to avoid tightening the poll interval. The constraint that remains is tuning, not cost: the window and debounce are validated against 10s spacing, so changing the interval means re-validating both.
 
-**Still open: behaviour beyond 35 minutes.** Real use is hours, not half an hour. Nothing observed so far suggests a problem, but multi-hour idle behaviour is simply unmeasured. The dropout handling above is partly insurance against that — a read path that quietly stops producing values now reads as away instead of as a phone that never leaves.
+**Still open: behaviour beyond 35 minutes.** Real use is hours, not half an hour. Nothing observed so far suggests a problem, but multi-hour idle behaviour is simply unmeasured.
+
+**Still open: fast departures.** Away detection takes ~40s by design. A phone carried out of range faster than that loses signal while the state is still `present`, which the dropout rule reads as `unknown`. Likely fix: look at the last few raw readings before the loss and treat a weak tail as a departure — how many is a number to tune from logs, not guess.
 
 ## Repo structure
 
@@ -155,20 +161,82 @@ perimeter/
 
 1. **iPhone → menu-bar app** — BLE advertisements, RSSI sampled locally via `system_profiler`.
 2. **menu-bar conditions the signal** — median smoothing, hysteresis, debounce — and derives a presence state. A poll that yields no reading is skipped rather than smoothed, and a sustained run of them reads as away.
-3. **menu-bar → api** — `POST` event *only on a state transition*, not every poll. (Not wired yet: `apps/api` doesn't exist, so transitions are currently logged at the seam where the POST will go.)
-4. **api evaluates rules** — is it within active hours? is the user on a break? has a notification fired too recently? — and returns a decision (e.g. `{ notify: true }`) in the same response.
+3. **menu-bar → api** — a `POST` on every state transition, sent immediately, **plus a heartbeat of the current state every 60s**. Never raw RSSI. (Not wired yet: `apps/api` doesn't exist, so transitions are currently logged at the seam where the POST will go.)
+4. **api evaluates rules** — is a session active (schedule, manual session, break)? is the phone present? has the nudge interval passed? — and returns a decision (e.g. `{ notify: true }`) in the same response.
 5. **menu-bar → user** — if told to, fires a native macOS notification.
 6. **api ↔ website** — config reads/writes, leaderboard data.
 7. **menu-bar → website** — a "Settings" item opens the site (`shell.openExternal`), ideally with a short-lived token in the URL so the user doesn't have to log in again.
 
-Edge detection now happens as part of debouncing in step 2, so the API receives transitions by construction rather than having to detect them. Notification cooldown stays in the API, where it belongs — it's a rule, not physics.
+Edge detection happens as part of debouncing in step 2, so the API receives transitions by construction rather than having to detect them. The heartbeat exists because some nudges happen when *nothing changes* — the phone was already on the desk when the session started, or it just stays there. Notification timing stays in the API, where it belongs — it's a rule, not physics.
 
 ## Key decisions and why
 
 - **Business logic lives in the API, not the Electron app.** Active-hours and break-state checks can change (user edits schedule, starts a break) and need one source of truth. The menu bar app is a sensor + renderer. The one exception is signal conditioning, for the reasons given above.
-- **Pause is website-only, on purpose.** The friction is the feature — an easy pause defeats the point. A menu-bar shortcut to `POST /sessions/:id/pause` could be added later without any backend change; deliberately not doing it yet.
+- **Breaks are website-only, on purpose.** The friction is the feature — an easy pause defeats the point. A menu-bar shortcut to `POST /breaks` could be added later without any backend change; deliberately not doing it yet.
 - **Docker is for local Postgres only** (`docker-compose`), not for the menu bar app or website. Production Postgres should be a managed service (Neon/Supabase/Render), not self-hosted.
 - **Hosting:** API on Render/Railway/Fly.io, website on Vercel, menu bar app packaged with `electron-builder` into a `.dmg` and distributed directly — no App Store, no notarization needed for Phase 1.
+
+## Sessions, focus and notifications
+
+Decided 2026-09-18; not built yet.
+
+### What the signal means
+
+`present`/`away` describe the **phone**, not the user. **Focus = the phone is verifiably away during an active session.** Planned refinement: also require recent keyboard/mouse activity (`HIDIdleTime` via `ioreg`), so time spent away from the Mac doesn't count as focus. That arrives as a second kind of event in the same log, with no schema change to what's below.
+
+### When a session is active
+
+- **Schedule.** Users set their own hours as blocks per weekday. The backend supports several blocks per day from the start; the MVP website edits one per day, so adding more later is frontend-only. Blocks can't cross midnight, and overlapping blocks are rejected on save (they would double-count scheduled time).
+- **Manual sessions.** Can be started from the website at any time, including outside the schedule, for a chosen length. `ends_at = started_at + length`, and it may run past midnight. Ending never requires an action, so forgetting a session is harmless.
+- **Breaks** (website only). Either 15 minutes, or the rest of the day (ends at local midnight). A rest-of-day break also ends any running manual session. Starting a session during a break ends the break (`ended_at`).
+- **The rule:** the latest user action wins; the schedule is the default when nothing overrides it.
+
+Everything is stored as **time ranges, not a status flag**. Nothing has to run at 9:00 or at the end of a break to flip state, so there are no cron jobs, and whether a session is active at any instant is a pure function of the rows. The same rows answer "how much focus today" for the leaderboard. Timestamps are stored in UTC; the user's timezone lives on the user row and is applied for the schedule and "midnight".
+
+There is **no stored `sessions` table** for scheduled sessions: focus time is computed from events, schedule, manual sessions and breaks. Add a daily rollup if the leaderboard ever gets slow.
+
+### Dropouts and unknown time
+
+- A dropout keeps the last verified state — see *When there's no number at all* above.
+- Mac Bluetooth off → `unknown`, plus a local nudge to turn it back on.
+- A heartbeat gap longer than ~2 minutes (Mac asleep, app not running) is recorded as `unknown` starting at the previous `last_seen_at`.
+- **Unknown time never counts as focus.**
+
+### Notifications
+
+- **Nudge whenever the phone is present during an active session** — whether it just arrived, or was already there when the session started or a break ended. Repeat every `notify_interval` while it stays (default 10 minutes, per user).
+- **Mechanism: a 60-second heartbeat.** The menu bar sends its current state every minute (as well as transitions immediately), and the API replies `{ notify }`. Heartbeats are not stored as events; they update `last_seen_at`, and gaps become `unknown` as above.
+- **Alternatives considered:**
+  - A `nextCheckAt` hint in each response: fewer requests, but it misses website changes (a break started on the site) until the next check, and gives no liveness signal.
+  - Server push (WebSocket/SSE): instant, but needs timers running on the server — the cron jobs the range model avoids — plus reconnect logic. Revisit if a website action ever has to reach the menu bar within seconds; the heartbeat stays as the fallback.
+  - Rules in the menu bar app: breaks the "API owns business logic" rule and creates two copies of the rules.
+
+  The heartbeat wins on failure mode: a missed request is corrected a minute later. Up to 60s of extra latency doesn't matter next to ~40s detection and a 10-minute nudge interval.
+
+### Tables (first pass)
+
+```
+users            id, name, timezone, notify_interval_s, last_seen_at
+schedule_blocks  id, user_id, weekday, start_time, end_time          -- several per day allowed
+presence_events  id, user_id, presence ('present'|'away'|'unknown'),
+                 cause, smoothed (nullable), occurred_at, received_at  -- append-only, transitions only
+manual_sessions  id, user_id, started_at, ends_at, ended_at (nullable)
+breaks           id, user_id, kind ('short'|'rest_of_day'), started_at, ends_at, ended_at (nullable)
+notifications    id, user_id, event_id (nullable), sent_at            -- audit trail + interval check
+```
+
+- `occurred_at` is when the Mac saw it; `received_at` is when the API got it. Rules and totals use `occurred_at`.
+- `notifications.event_id` is nullable because heartbeat-triggered nudges have no triggering event.
+- `cause` records why an event happened (signal, dropout, heartbeat gap), so dropout policy can change later without a migration. The exact set of values gets settled when the schema is written.
+
+### Minimal first cut
+
+1. `docker-compose` with Postgres only.
+2. `apps/api`: Express + Drizzle, one migration, one seeded user. No auth.
+3. The transition + heartbeat endpoint, returning `{ notify }`.
+4. Replace the `TODO` in the menu bar's `onEvent` with the request, and print the decision.
+
+Done when: phone on the desk during an active schedule block prints `notify: true`, and the same state a minute later prints `notify: false` until the interval passes.
 
 ## Fallbacks if RSSI fails
 
