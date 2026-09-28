@@ -11,6 +11,16 @@ function onEvent(event: PresenceEvent): void {
   const detail = event.smoothed === null ? event.cause : `${event.cause}, smoothed ${event.smoothed} dBm`;
   console.log(`${stamp()}  → ${event.presence.toUpperCase()} (${detail})`);
 
+  // Stands in for the macOS notification until there's an Electron shell to fire one. `unknown` is
+  // the one state the Mac can't resolve by itself, so it's the one that has to ask.
+  if (event.presence === "unknown") {
+    const nudge =
+      event.cause === "bluetooth-off"
+        ? "Bluetooth is off on this Mac — turn it on to keep tracking."
+        : "Can't see your phone — is Bluetooth off?";
+    console.log(`${stamp()}     ${nudge}`);
+  }
+
   // TODO: POST the transition to apps/api once it exists. Transitions only, never raw RSSI —
   // `smoothed` rides along as optional debug telemetry.
 }

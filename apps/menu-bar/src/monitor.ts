@@ -9,22 +9,26 @@ export interface MonitorConfig {
 
 export const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
   pollIntervalMs: 10_000,
-  // 3 × 10s ≈ the ~40s latency of the signal path, so a dropout isn't a faster route to `away`.
+  // 3 × 10s clears macOS's habit of echoing the last RSSI for ~3 polls before it drops the field,
+  // so a blackout is only called once the echoes have run out.
   dropoutSamples: 3,
   filter: DEFAULT_CONFIG,
 };
 
+/** Wider than `Presence`: the filter only ever argues present/away, but a blackout has no answer. */
+export type ReportedPresence = Presence | "unknown";
+
 export interface PresenceEvent {
-  readonly presence: Presence;
+  readonly presence: ReportedPresence;
   /** Null on a dropout: inventing a value would misreport a sensor failure as a reading. */
   readonly smoothed: number | null;
-  readonly cause: "signal" | "dropout";
+  readonly cause: "signal" | "dropout" | "bluetooth-off";
 }
 
 export interface MonitorState {
   readonly filter: FilterState;
   readonly failures: number;
-  readonly emitted: Presence | null;
+  readonly emitted: ReportedPresence | null;
 }
 
 export const INITIAL_MONITOR_STATE: MonitorState = {
@@ -41,8 +45,8 @@ export interface AdvanceResult {
 /**
  * A dropout is never fed to the filter as a fake sample — a missing measurement is not a weak one,
  * and a floor value would let one flaky invocation drag the median toward away. Short dropouts are
- * skipped instead, leaving the window intact so a one-poll glitch costs nothing on recovery; only a
- * sustained run of them (`dropoutSamples`) is treated as away in its own right.
+ * skipped instead, leaving the window intact so a one-poll glitch costs nothing on recovery; a
+ * sustained run of them (`dropoutSamples`) keeps the last verified state instead of assuming away.
  */
 export function advance(state: MonitorState, reading: Reading, config: MonitorConfig): AdvanceResult {
   if (reading.ok) {
@@ -62,10 +66,22 @@ export function advance(state: MonitorState, reading: Reading, config: MonitorCo
 
   // Clear the window too: those samples predate the blackout, and letting them vote once readings
   // return would judge the present on stale evidence.
-  return emit(
-    { filter: INITIAL_STATE, failures, emitted: state.emitted },
-    { presence: "away", smoothed: null, cause: "dropout" },
-  );
+  const blacked = { filter: INITIAL_STATE, failures, emitted: state.emitted };
+
+  // This Mac's own radio says nothing about where the phone is, so no prior state survives it.
+  if (reading.reason === "bluetooth-off") {
+    return emit(blacked, { presence: "unknown", smoothed: null, cause: "bluetooth-off" });
+  }
+
+  // A vanished phone looks the same whether it left or its Bluetooth was switched off, so the state
+  // going in decides: walking away decays through `awayBelow` first and banks an `away`, while a
+  // switch flipped at the desk jumps straight from a strong reading to silence. Anything not already
+  // verified away — including a cold start that never saw the phone — is unresolved, not focus.
+  return emit(blacked, {
+    presence: state.emitted === "away" ? "away" : "unknown",
+    smoothed: null,
+    cause: "dropout",
+  });
 }
 
 /** Suppresses a candidate that restates the current presence — the filter and the dropout path can both argue for `away`. */

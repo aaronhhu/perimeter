@@ -14,7 +14,8 @@ import type { Reading } from "./sampler";
 const CONFIG: MonitorConfig = { ...DEFAULT_MONITOR_CONFIG, filter: DEFAULT_CONFIG };
 
 const ok = (rssi: number): Reading => ({ ok: true, rssi });
-const dropout = (): Reading => ({ ok: false, reason: "device-absent", detail: "test" });
+const dropout = (): Reading => ({ ok: false, reason: "rssi-absent", detail: "test" });
+const macRadioOff = (): Reading => ({ ok: false, reason: "bluetooth-off", detail: "test" });
 
 const DESK = [-44, -43, -45, -44, -46, -42, -44, -45, -43, -44];
 const AWAY = [-74, -73, -75, -74, -76, -72, -74, -75, -73, -74];
@@ -62,13 +63,44 @@ describe("advance", () => {
     expect(glitched.indices[1]).toBe((clean.indices[1] ?? 0) + 1);
   });
 
-  it("treats a sustained dropout as away, with no invented measurement", () => {
+  it("reports unknown, not away, when the phone vanishes straight from present", () => {
+    // The one-tap cheat: Bluetooth off at the desk must not buy the focus credit that walking away does.
     const { events } = run([...DESK.map(ok), dropout(), dropout(), dropout()]);
 
     expect(events).toEqual([
       { presence: "present", smoothed: -44, cause: "signal" },
-      { presence: "away", smoothed: null, cause: "dropout" },
+      { presence: "unknown", smoothed: null, cause: "dropout" },
     ]);
+  });
+
+  it("holds away when the phone vanishes after already being verified away", () => {
+    const walked = run([...DESK, ...AWAY].map(ok));
+    const { events, state } = run(Array.from({ length: 5 }, dropout), CONFIG, walked.state);
+
+    expect(events).toEqual([]);
+    expect(state.emitted).toBe("away");
+  });
+
+  it("reports unknown when the phone was never seen at all", () => {
+    // A cold start with the phone already invisible has verified nothing, so it has earned nothing.
+    const { events } = run(Array.from({ length: 3 }, dropout));
+    expect(events).toEqual([{ presence: "unknown", smoothed: null, cause: "dropout" }]);
+  });
+
+  it("reports unknown when this Mac's radio is off, whatever the last verified state was", () => {
+    // Unlike a vanished phone, the Mac's own radio says nothing about distance, so away can't stand.
+    const walked = run([...DESK, ...AWAY].map(ok));
+    const { events } = run(Array.from({ length: 3 }, macRadioOff), CONFIG, walked.state);
+
+    expect(events).toEqual([{ presence: "unknown", smoothed: null, cause: "bluetooth-off" }]);
+  });
+
+  it("recovers from unknown once the phone is readable again", () => {
+    const blacked = run([...DESK.map(ok), dropout(), dropout(), dropout()]);
+    expect(blacked.state.emitted).toBe("unknown");
+
+    const { events } = run(DESK.map(ok), CONFIG, blacked.state);
+    expect(events.map((e) => e.presence)).toEqual(["present"]);
   });
 
   it("commits the dropout exactly on the configured count, not before", () => {
@@ -81,13 +113,7 @@ describe("advance", () => {
 
   it("announces a sustained dropout once, not every poll", () => {
     const { events } = run([...DESK.map(ok), ...Array.from({ length: 20 }, dropout)]);
-    expect(events.filter((e) => e.presence === "away")).toHaveLength(1);
-  });
-
-  it("stays quiet when a dropout only confirms an away it already announced", () => {
-    const settled = run([...DESK, ...AWAY].map(ok));
-    const { events } = run(Array.from({ length: 5 }, dropout), CONFIG, settled.state);
-    expect(events).toEqual([]);
+    expect(events.filter((e) => e.cause === "dropout")).toHaveLength(1);
   });
 
   it("rebuilds the window from scratch after a dropout, rather than reusing pre-blackout samples", () => {

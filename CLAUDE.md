@@ -46,7 +46,7 @@ Distance is gradual, a switch is abrupt. Walking away decays the RSSI through �
 
 The nudge is the enforcement, not a fallback: the one case the sensor can't resolve gets handed to the user. Known false positive — leaving fast enough to go `present` → absent without ever confirming `away` earns a spurious nudge.
 
-**Not implemented yet.** `advance` in `apps/menu-bar/src/monitor.ts` emits `away` on every sustained dropout. The `away` case is correct by accident, since `emit` suppresses a repeat of the current state; the `present` case is the loophole. Needs a third state — there is no `unknown` in `Presence`.
+Built in `advance` (`apps/menu-bar/src/monitor.ts`). `unknown` lives on `ReportedPresence`, not on `Presence` — the filter argues present/away and nothing else, so widening its output type would invent a state it can never reach. A cold start and a Mac with its own Bluetooth off both skip the rule and go straight to `unknown`; neither has an `away` worth keeping.
 
 ## Architecture rules
 
