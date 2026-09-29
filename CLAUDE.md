@@ -22,18 +22,29 @@ Verified over a 35-minute idle run (138 samples): values keep updating, no stale
 
 Tuned parameters, validated by simulation against the real idle log (zero false transitions):
 
-- Poll interval: 10s
+- Poll interval: 5s — provisional; the one value the idle log does *not* validate, see below
 - Median window: 5 samples
 - Debounce: 2 consecutive
 - Present → Away below −65; Away → Present above −55
 
-Detection latency is ~40s by design. Do not "optimize" this away — it's the cost of not firing on noise.
+Detection latency is ~4 polls by design — 20s at 5s, 40s at 10s. Do not "optimize" this away — it's the cost of not firing on noise.
 
-**Stale RSSI resolved — no staleness detection needed.** Tested on both Wi-Fi and hotspot: with iPhone Bluetooth off, `system_profiler` keeps serving the last known RSSI for ~3 polls, then drops the `device_rssi` field entirely, which the sampler already reports as `rssi-absent`. A frozen value does not persist, so the planned "identical value for N consecutive polls" heuristic is unnecessary — don't build it. Cost is latency: ~30s of stale repeats, then `dropoutSamples` before the dropout path fires, so ~60s total.
+**The poll interval is 5s, on trial.** A 4-minute run at 5s (2026-09-29) cleared the one blocking question: `system_profiler` does refresh at that rate. Values changed on 63% of polls with runs of 1–3, nothing like the 3× duplication that would have made the median vote on one physical reading three times. Signal-path latency halved as intended — cold start and post-blackout recovery both confirmed `present` in 26s against 52s at 10s.
+
+Two things it did *not* settle, and both want a 30+ minute run before 5s is called final:
+
+- **A spike landing inside a hold.** Replaying the real −69 desk spike: held for 1 or 2 polls the filter absorbs it, held for 3 it commits a false `away`. The 5s run produced 3-runs but contained no spike (the 35-minute log had two, so 4 minutes is simply too short). The failure now needs both to coincide — a probability, not an impossibility.
+- **Effective window shrinkage.** 21 distinct values across 33 polls is ~3.2 independent samples per 5-wide window, down from ~4.6 at 15s spacing.
+
+Faster polling does *not* speed up the dropout path, so don't expect it to: freeze-to-nudge measured 56s at 5s against ~60s at 10s. The echo dominates and is wall-clock; only `dropoutSamples` scales.
+
+**Stale RSSI resolved — no staleness detection needed.** Tested on both Wi-Fi and hotspot: with iPhone Bluetooth off, `system_profiler` keeps serving the last known RSSI, then drops the `device_rssi` field entirely, which the sampler already reports as `rssi-absent`. **The echo is wall-clock, not poll-count** — ~30–45s, seen as 9 identical repeats at a 5s poll; the earlier "~3 polls" was an artifact of only ever measuring at 10s. A frozen value still does not persist, so the planned "identical value for N consecutive polls" heuristic remains unnecessary — don't build it. Cost is latency: ~45s of stale repeats, then `dropoutSamples`, so ~75s total.
 
 **`rssi-absent` is ambiguous, and that's the real loophole.** A phone out of range produces exactly the same `rssi-absent` as a phone on the desk with Bluetooth off. The symptom alone cannot tell genuine focus from gaming the session. See dropout handling below — the fix is not in the sampler.
 
 **A single raw sample must never change state.** A −69 was recorded with the phone sitting untouched on the desk, which is past the away threshold. Median smoothing plus debounce exists specifically because of that observed sample, not as a precaution.
+
+That invariant is weaker at 5s than it was at 10s, and it's worth knowing why. A 30–45s frozen echo is 9 samples at 5s — enough to fill the 5-wide window completely, so the filter can commit a transition on what is physically one measurement. At 10s an echo was 3 samples and could never outvote the window. Harmless when the frozen value is deep in present territory, as observed; not harmless if a freeze ever captures a value near a threshold.
 
 **Thresholds are environment-specific.** Calibrated to one room, one Mac, one phone. They live in config. A calibration flow is a known future need.
 
@@ -52,7 +63,7 @@ Built in `advance` (`apps/menu-bar/src/monitor.ts`). `unknown` lives on `Reporte
 
 **The menu bar app posts presence *transitions* (immediately) plus a 60s heartbeat of the current state — never raw RSSI.** The API sees `present`/`away` events, optionally with a smoothed value as debug telemetry. Edge detection happens in the filter's debounce, so the API never has to detect edges itself.
 
-**All business logic lives in the API** — active hours, break state, notification decisions, cooldowns. The one deliberate exception is signal conditioning (smoothing/hysteresis), which is device physics and per-machine calibration, not a rule, and runs at a 10s cadence.
+**All business logic lives in the API** — active hours, break state, notification decisions, cooldowns. The one deliberate exception is signal conditioning (smoothing/hysteresis), which is device physics and per-machine calibration, not a rule, and runs at a 5s cadence.
 
 **Pause is website-only on purpose.** The friction is the feature. Do not add a menu-bar pause shortcut.
 

@@ -38,7 +38,7 @@ The two checks operate at different layers. `--is-connected` asks about a negoti
 This is strictly better than the connected/disconnected signal originally planned:
 
 - It's continuous rather than binary, so *we* choose the distance threshold instead of accepting Apple's disconnect timeout.
-- It's fast *at the source*. Raw readings track movement within a single sample, ~6 seconds. The shipped detection latency is deliberately slower (~40s) because conditioning trades responsiveness for not firing on noise — see *Signal conditioning*.
+- It's fast *at the source*. Raw readings track movement within a single sample, ~6 seconds. The shipped detection latency is deliberately slower (~4 polls, so 20s at the current 5s interval) because conditioning trades responsiveness for not firing on noise — see *Signal conditioning*.
 - Identity is solved by the pairing bond. The advertisements come from a rotating address, but the bond lets the Mac resolve it back to the paired iPhone, so each reading is attributed to the right device. This is why the pairing must stay — see below.
 
 ### The pairing bond is load-bearing
@@ -129,15 +129,17 @@ One cadence detail that matters: **the next poll is scheduled after the previous
 
 ### Risks, and what testing settled
 
-**Staleness — settled, and no detection needed.** The worry was that `system_profiler` might report a cached last-known value forever. The 35-minute idle run (138 samples, phone untouched, Bluetooth on) showed values updating throughout: the longest run of identical consecutive values was 3 (116 singles, 8 pairs, 2 triples). Turning the iPhone's Bluetooth off does freeze the value, but not indefinitely — tested on both Wi-Fi and hotspot, macOS repeats the last RSSI for about three polls and then drops `device_rssi` entirely, which the sampler already reports as `rssi-absent`. The planned heuristic (identical value for N consecutive polls → dropout, backdated to the freeze) was therefore dropped: the existing dropout path covers it, at the cost of ~30s before the failure counter starts.
+**Staleness — settled, and no detection needed.** The worry was that `system_profiler` might report a cached last-known value forever. The 35-minute idle run (138 samples, phone untouched, Bluetooth on) showed values updating throughout: the longest run of identical consecutive values was 3 (116 singles, 8 pairs, 2 triples). Turning the iPhone's Bluetooth off does freeze the value, but not indefinitely — tested on both Wi-Fi and hotspot, macOS repeats the last RSSI and then drops `device_rssi` entirely, which the sampler already reports as `rssi-absent`. The planned heuristic (identical value for N consecutive polls → dropout, backdated to the freeze) was therefore dropped: the existing dropout path covers it.
+
+That echo was originally recorded as "about three polls". A later run at a 5s interval showed **nine** identical repeats, which corrects the finding rather than contradicting it: the echo is a wall-clock duration of roughly 30–45s, and the original figure was an artifact of measuring it only at 10s. Two consequences. The failure counter now starts ~45s in, not ~30s. And polling faster barely improves the dropout path at all — freeze-to-nudge measured 56s at 5s against ~60s at 10s, because the echo is fixed and only `dropoutSamples` scales with the interval. `dropoutSamples` was raised 3 → 6 to keep that counter worth ~30s of wall clock, so a single slow `system_profiler` still cannot fire a user-facing nudge.
 
 What the test did surface is a different problem. `rssi-absent` is the end state for *both* Bluetooth-off and genuinely-out-of-range, so the sampler cannot tell a session being gamed from one being honoured. That ambiguity is resolved a layer up rather than in the sampler — see *When there's no number at all*, where it is the entire reason for the last-verified-state rule.
 
-**Invocation cost — measured, and ~20× cheaper than first recorded.** This document previously put `system_profiler` at 1–2 seconds per invocation. Measured on the development Mac across several runs, it is **50–75ms**, so it is not the heavyweight call it was assumed to be, and cost is no longer a reason to avoid tightening the poll interval. The constraint that remains is tuning, not cost: the window and debounce are validated against 10s spacing, so changing the interval means re-validating both.
+**Invocation cost — measured, and ~20× cheaper than first recorded.** This document previously put `system_profiler` at 1–2 seconds per invocation. Measured on the development Mac across several runs, it is **50–75ms**, so it is not the heavyweight call it was assumed to be, and cost is no longer a reason to avoid tightening the poll interval. The constraint that remains is tuning, not cost: the window and debounce were validated against 15s spacing, so changing the interval means re-validating both. The interval is currently 5s on trial — see *Signal conditioning* in CLAUDE.md for what that run settled and what it left open.
 
 **Still open: behaviour beyond 35 minutes.** Real use is hours, not half an hour. Nothing observed so far suggests a problem, but multi-hour idle behaviour is simply unmeasured.
 
-**Still open: fast departures.** Away detection takes ~40s by design. A phone carried out of range faster than that loses signal while the state is still `present`, which the dropout rule reads as `unknown`. Likely fix: look at the last few raw readings before the loss and treat a weak tail as a departure — how many is a number to tune from logs, not guess.
+**Still open: fast departures.** Away detection takes ~4 polls by design, so 20s at the current 5s interval. A phone carried out of range faster than that loses signal while the state is still `present`, which the dropout rule reads as `unknown`. Likely fix: look at the last few raw readings before the loss and treat a weak tail as a departure — how many is a number to tune from logs, not guess.
 
 ## Repo structure
 
@@ -211,7 +213,7 @@ There is **no stored `sessions` table** for scheduled sessions: focus time is co
   - Server push (WebSocket/SSE): instant, but needs timers running on the server — the cron jobs the range model avoids — plus reconnect logic. Revisit if a website action ever has to reach the menu bar within seconds; the heartbeat stays as the fallback.
   - Rules in the menu bar app: breaks the "API owns business logic" rule and creates two copies of the rules.
 
-  The heartbeat wins on failure mode: a missed request is corrected a minute later. Up to 60s of extra latency doesn't matter next to ~40s detection and a 10-minute nudge interval.
+  The heartbeat wins on failure mode: a missed request is corrected a minute later. Up to 60s of extra latency doesn't matter next to ~20s detection and a 10-minute nudge interval.
 
 ### Tables (first pass)
 

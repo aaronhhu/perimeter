@@ -8,10 +8,11 @@ export interface MonitorConfig {
 }
 
 export const DEFAULT_MONITOR_CONFIG: MonitorConfig = {
-  pollIntervalMs: 10_000,
-  // 3 × 10s clears macOS's habit of echoing the last RSSI for ~3 polls before it drops the field,
-  // so a blackout is only called once the echoes have run out.
-  dropoutSamples: 3,
+  pollIntervalMs: 5_000,
+  // Wall-clock, not polls: macOS echoes the last RSSI for 30–45s before dropping the field (9
+  // repeats at 5s, which a 10s poll had made look like 3), so this counter only starts after that.
+  // 6 × 5s holds the glitch tolerance at 30s — one slow system_profiler must not fire a nudge.
+  dropoutSamples: 6,
   filter: DEFAULT_CONFIG,
 };
 

@@ -11,7 +11,9 @@ import {
 } from "./monitor";
 import type { Reading } from "./sampler";
 
-const CONFIG: MonitorConfig = { ...DEFAULT_MONITOR_CONFIG, filter: DEFAULT_CONFIG };
+// Pinned rather than inherited: these cases assert the dropout policy, and the shipped count is a
+// tuning value that moves with the poll interval.
+const CONFIG: MonitorConfig = { ...DEFAULT_MONITOR_CONFIG, dropoutSamples: 3, filter: DEFAULT_CONFIG };
 
 const ok = (rssi: number): Reading => ({ ok: true, rssi });
 const dropout = (): Reading => ({ ok: false, reason: "rssi-absent", detail: "test" });
