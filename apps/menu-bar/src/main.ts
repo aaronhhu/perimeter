@@ -140,5 +140,7 @@ function notify(event: PresenceEvent): void {
   if (nudge.offersBluetoothSettings) {
     notification.on("click", () => void shell.openExternal(BLUETOOTH_SETTINGS));
   }
+  // macOS rejects a refused notification without a prompt or a Settings entry; this is the only trace.
+  notification.on("failed", (_event, error) => console.error(`${stamp()}  notification failed: ${error}`));
   notification.show();
 }
