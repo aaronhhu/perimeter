@@ -72,13 +72,20 @@ export interface Nudge {
 }
 
 /**
- * Only `unknown` nudges locally. `present` during a session is also worth a notification, but that
- * depends on active hours, breaks and a cooldown, so it belongs to the API — whereas `unknown` is
- * the one case the sensor itself cannot resolve, which is why it's handed to the user on the spot.
+ * `present` nudges on every arrival for now, session or not — a stand-in until the API exists and
+ * its `{ notify }` decides, since only it knows active hours, breaks and cooldowns. `unknown` stays
+ * local for good: it's the one case the sensor itself cannot resolve.
  *
- * No cooldown needed: the monitor emits transitions only, so one dropout episode nudges once.
+ * No cooldown needed: the monitor emits transitions only, so one episode nudges once.
  */
 export function nudgeFor(event: PresenceEvent): Nudge | null {
+  if (event.presence === "present") {
+    return {
+      title: "Your phone is in range",
+      body: "Take it out of the perimeter.",
+      offersBluetoothSettings: false,
+    };
+  }
   if (event.presence !== "unknown") return null;
 
   switch (event.cause) {

@@ -94,8 +94,7 @@ function start(): void {
 
       // TODO: POST the transition to apps/api once it exists, plus a 60s heartbeat of the current
       // state. Transitions only, never raw RSSI — `smoothed` rides along as debug telemetry.
-      // The response's `{ notify }` is what will drive a `present`-during-session nudge; this app
-      // decides nothing about that.
+      // The response's `{ notify }` then replaces the unconditional `present` nudge in `nudgeFor`.
     },
     onReading: (reading, monitorState) => {
       // Ungated, unlike the CLI's equivalent: a packaged tray app has nowhere to print, so this only

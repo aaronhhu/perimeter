@@ -22,6 +22,9 @@ function onEvent(event: PresenceEvent): void {
           : "Can't see your phone — is Bluetooth off?";
     console.log(`${stamp()}     ${nudge}`);
   }
+  if (event.presence === "present") {
+    console.log(`${stamp()}     Your phone is in range — take it out of the perimeter.`);
+  }
 
   // TODO: POST the transition to apps/api once it exists. Transitions only, never raw RSSI —
   // `smoothed` rides along as optional debug telemetry.

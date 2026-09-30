@@ -31,8 +31,11 @@ describe("iconName", () => {
 });
 
 describe("nudgeFor", () => {
-  it("stays silent on present and away — whether those deserve a notification is the API's call", () => {
-    expect(nudgeFor(event({ presence: "present", smoothed: -44, cause: "signal" }))).toBeNull();
+  it("nudges when the phone comes into range", () => {
+    expect(nudgeFor(event({ presence: "present", smoothed: -44, cause: "signal" }))).not.toBeNull();
+  });
+
+  it("stays silent on away — that's the state it's asking for", () => {
     expect(nudgeFor(event({ presence: "away", smoothed: -72, cause: "signal" }))).toBeNull();
   });
 

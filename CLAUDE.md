@@ -108,6 +108,9 @@ headless CLI — that's what tuning runs use. **Don't move signal logic into `ma
 
 ## Not yet, on purpose
 
+- **The `present` nudge fires on every arrival, session or not.** A deliberate stand-in: without the API
+  there's no notion of a session, active hours or breaks. When the API lands, its `{ notify }` decides
+  instead — don't add session logic to the menu bar to make the stand-in smarter.
 - **No `apps/api` yet**, so the menu bar has no HTTP client and no 60s heartbeat — both halves of that contract get built together, against a real endpoint, rather than guessed at now. The seam is the `TODO` in `onEvent`, in both `index.ts` and `main.ts`.
 - **No `packages/shared-types`.** Create it when a type would otherwise be copy-pasted into a second app, not before. When created, decide the consumption model: no-build `"types": "./src/index.ts"` works for Vite and bundlers but breaks a plain `tsc` build of the API.
 - **Phase 2 (website blocking via `/etc/hosts`) is not started.** Don't build toward it yet.
