@@ -86,7 +86,25 @@ describe("advance", () => {
   it("reports unknown when the phone was never seen at all", () => {
     // A cold start with the phone already invisible has verified nothing, so it has earned nothing.
     const { events } = run(Array.from({ length: 3 }, dropout));
+    expect(events).toEqual([{ presence: "unknown", smoothed: null, cause: "cold-start" }]);
+  });
+
+  it("calls it a vanish, not a cold start, when the phone was seen before the first verdict", () => {
+    // Observed: five readings at -36 dBm, then Bluetooth off, one poll short of the first commit.
+    // Keying the cold start off `emitted === null` gave the one-tap cheat a ~30s free window.
+    const { events } = run([...DESK.slice(0, 5).map(ok), dropout(), dropout(), dropout()]);
+
     expect(events).toEqual([{ presence: "unknown", smoothed: null, cause: "dropout" }]);
+  });
+
+  it("separates a cold start from a vanish, so only the suspicious one can be accused", () => {
+    // Identical state and identical lack of credit — but putting the phone in another room before
+    // starting is the honest path, and must not draw the one-tap cheat's nudge.
+    const cold = run(Array.from({ length: 3 }, dropout));
+    const vanished = run([...DESK.map(ok), dropout(), dropout(), dropout()]);
+
+    expect(cold.events.at(-1)).toMatchObject({ presence: "unknown", cause: "cold-start" });
+    expect(vanished.events.at(-1)).toMatchObject({ presence: "unknown", cause: "dropout" });
   });
 
   it("reports unknown when this Mac's radio is off, whatever the last verified state was", () => {
@@ -188,5 +206,60 @@ describe("startMonitor", () => {
 
     expect(errors).toHaveLength(1);
     expect(polls).toBeGreaterThan(pollsAtError);
+  });
+});
+
+describe("reset", () => {
+  /** Drives the loop one reading at a time: an empty queue stalls the poll rather than inventing a sample. */
+  function harness(config: MonitorConfig) {
+    const queue: Reading[] = [];
+    const events: PresenceEvent[] = [];
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+    const monitor = startMonitor({
+      config: { ...config, pollIntervalMs: 0 },
+      read: async () => {
+        while (queue.length === 0) await tick();
+        const reading = queue.shift();
+        if (reading === undefined) throw new Error("queue emptied between the check and the shift");
+        return reading;
+      },
+      onEvent: (event) => events.push(event),
+    });
+
+    const feed = async (...readings: readonly Reading[]) => {
+      queue.push(...readings);
+      while (queue.length > 0) await tick();
+      await new Promise((resolve) => setTimeout(resolve, 2)); // let the last reading's event land
+    };
+
+    return { events, feed, monitor };
+  }
+
+  it("makes the filter rebuild a full window before it will argue again", async () => {
+    const { events, feed, monitor } = harness(CONFIG);
+    await feed(...DESK.slice(0, 6).map(ok));
+    expect(events.map((e) => e.presence)).toEqual(["present"]);
+
+    monitor.reset();
+    // Four away samples would have outvoted the surviving desk window; against an empty one they
+    // don't even fill it.
+    await feed(...AWAY.slice(0, 4).map(ok));
+    expect(events).toHaveLength(1);
+
+    await feed(...AWAY.slice(4, 6).map(ok));
+    expect(events.map((e) => e.presence)).toEqual(["present", "away"]);
+    monitor.stop();
+  });
+
+  it("keeps the last verified state, so a dropout after it isn't mistaken for a cold start", async () => {
+    const { events, feed, monitor } = harness(CONFIG);
+    await feed(...DESK.slice(0, 6).map(ok));
+
+    monitor.reset();
+    await feed(...Array.from({ length: CONFIG.dropoutSamples }, dropout));
+
+    expect(events[1]).toEqual({ presence: "unknown", smoothed: null, cause: "dropout" });
+    monitor.stop();
   });
 });

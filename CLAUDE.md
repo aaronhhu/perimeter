@@ -40,7 +40,9 @@ Faster polling does *not* speed up the dropout path, so don't expect it to: free
 
 **Stale RSSI resolved — no staleness detection needed.** Tested on both Wi-Fi and hotspot: with iPhone Bluetooth off, `system_profiler` keeps serving the last known RSSI, then drops the `device_rssi` field entirely, which the sampler already reports as `rssi-absent`. **The echo is wall-clock, not poll-count** — ~30–45s, seen as 9 identical repeats at a 5s poll; the earlier "~3 polls" was an artifact of only ever measuring at 10s. A frozen value still does not persist, so the planned "identical value for N consecutive polls" heuristic remains unnecessary — don't build it. Cost is latency: ~45s of stale repeats, then `dropoutSamples`, so ~75s total.
 
-**`rssi-absent` is ambiguous, and that's the real loophole.** A phone out of range produces exactly the same `rssi-absent` as a phone on the desk with Bluetooth off. The symptom alone cannot tell genuine focus from gaming the session. See dropout handling below — the fix is not in the sampler.
+**`rssi-absent` is ambiguous, and that's the real loophole.** A phone out of range produces exactly the same `rssi-absent` as a phone on the desk with Bluetooth off — both halves now observed directly, not assumed. The symptom alone cannot tell genuine focus from gaming the session. See dropout handling below — the fix is not in the sampler.
+
+**`device-absent` is not the way out of that, so don't reach for it.** The device list is built from pairing records, not from what's currently reachable: anything ever paired stays listed forever, which is why the AirPods sit in it with no `device_rssi` at all. A far-away phone is therefore still listed, and still `rssi-absent`. `device-absent` means a wrong address in config or a broken pairing — it can never mean distance. The whole entry is six fields (`device_address`, `device_firmwareVersion`, `device_minorType`, `device_productID`, `device_rssi`, `device_vendorID`): no timestamp, no last-seen, nothing else to infer from.
 
 **A single raw sample must never change state.** A −69 was recorded with the phone sitting untouched on the desk, which is past the away threshold. Median smoothing plus debounce exists specifically because of that observed sample, not as a precaution.
 
@@ -58,6 +60,10 @@ Distance is gradual, a switch is abrupt. Walking away decays the RSSI through �
 The nudge is the enforcement, not a fallback: the one case the sensor can't resolve gets handed to the user. Known false positive — leaving fast enough to go `present` → absent without ever confirming `away` earns a spurious nudge.
 
 Built in `advance` (`apps/menu-bar/src/monitor.ts`). `unknown` lives on `ReportedPresence`, not on `Presence` — the filter argues present/away and nothing else, so widening its output type would invent a state it can never reach. A cold start and a Mac with its own Bluetooth off both skip the rule and go straight to `unknown`; neither has an `away` worth keeping.
+
+Those two carry their own `cause` (`cold-start`, `bluetooth-off`) rather than `dropout`, because nothing disappeared in either — and starting a session with the phone already in another room is the *honest* path, probably the most common one. It must not draw the one-tap cheat's accusation. The state is the same and so is the absence of credit; only the wording changes. Turning a `cold-start` into credit can't come from the sensor at all — it needs the user to assert "it's in the other room", which belongs on the website next to pause.
+
+**`cold-start` means never having *seen* the phone, not never having committed a state.** `MonitorState.seen` tracks that separately, because the first verdict takes 6 polls (~30s at 5s) and readings arrive long before it. Keying off `emitted === null` instead left a ~30s hole at launch where flipping Bluetooth off at the desk was reported as a cold start and drew the gentle message — observed with five readings at −36 dBm, then silence one poll short of the commit. A phone that was plainly there and then went quiet is a vanish however early it happens.
 
 ## Architecture rules
 

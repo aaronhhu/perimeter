@@ -17,12 +17,16 @@ function onEvent(event: PresenceEvent): void {
     const nudge =
       event.cause === "bluetooth-off"
         ? "Bluetooth is off on this Mac — turn it on to keep tracking."
-        : "Can't see your phone — is Bluetooth off?";
+        : event.cause === "cold-start"
+          ? "Haven't seen your phone yet — nothing counts until it turns up."
+          : "Can't see your phone — is Bluetooth off?";
     console.log(`${stamp()}     ${nudge}`);
   }
 
   // TODO: POST the transition to apps/api once it exists. Transitions only, never raw RSSI —
   // `smoothed` rides along as optional debug telemetry.
+  // TODO: `cold-start` has no way to resolve into credit yet. The sensor can't, ever — that needs
+  // the user asserting "it's in the other room", which belongs on the website next to pause.
 }
 
 function onReading(reading: Reading, state: MonitorState): void {
