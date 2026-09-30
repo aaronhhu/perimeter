@@ -40,6 +40,12 @@ function filling({ filter }: MonitorState): string {
   return justFilled ? `  (window ${windowSize}/${windowSize} — filter live)` : "";
 }
 
+/**
+ * Repeats until the phone leaves. It ignores sessions for now, so until pause exists on the website,
+ * quitting the app is the way to stop it.
+ */
+const PRESENT_REMINDER_MS = 30_000;
+
 /** macOS's own Bluetooth pane. Offered because a nudge the user can't act on from the notification is half a nudge. */
 const BLUETOOTH_SETTINGS = "x-apple.systempreferences:com.apple.BluetoothSettings";
 
@@ -83,6 +89,9 @@ function start(): void {
 
   render();
 
+  let reminder: NodeJS.Timeout | undefined;
+  const cancelReminder = (): void => clearInterval(reminder);
+
   const monitor: MonitorHandle = startMonitor({
     device,
     config,
@@ -90,6 +99,11 @@ function start(): void {
       view = viewOf(event);
       render();
       notify(event);
+      cancelReminder();
+      if (event.presence === "present") {
+        // Any later transition cancels this, so firing at all means the phone never left.
+        reminder = setInterval(() => notify(event), PRESENT_REMINDER_MS);
+      }
       console.log(`${stamp()}  → ${event.presence.toUpperCase()} (${event.cause})`);
 
       // TODO: POST the transition to apps/api once it exists, plus a 60s heartbeat of the current
@@ -118,9 +132,15 @@ function start(): void {
 
   // A gap in heartbeats is how the API will notice the Mac was asleep; the tray only has to make
   // sure the filter isn't judging the present on samples from before it.
+  // The reminder keeps running: reset() keeps `emitted`, so a phone still here after the wake never
+  // re-announces `present`, and cancelling here would silence it for good. If it moved while the Mac
+  // slept, the transition that follows cancels it as usual.
   powerMonitor.on("resume", () => monitor.reset());
 
-  app.on("will-quit", () => monitor.stop());
+  app.on("will-quit", () => {
+    cancelReminder();
+    monitor.stop();
+  });
 }
 
 function trayImage(view: StatusView): Electron.NativeImage {
