@@ -65,6 +65,30 @@ Those two carry their own `cause` (`cold-start`, `bluetooth-off`) rather than `d
 
 **`cold-start` means never having *seen* the phone, not never having committed a state.** `MonitorState.seen` tracks that separately, because the first verdict takes 6 polls (~30s at 5s) and readings arrive long before it. Keying off `emitted === null` instead left a ~30s hole at launch where flipping Bluetooth off at the desk was reported as a cold start and drew the gentle message — observed with five readings at −36 dBm, then silence one poll short of the commit. A phone that was plainly there and then went quiet is a vanish however early it happens.
 
+## The menu bar shell
+
+Electron is the shell and nothing more. `sampler`/`filter`/`monitor` import no Electron API, so the
+filter stays a pure function tested against the recorded RSSI log, and `pnpm dev` still runs the
+headless CLI — that's what tuning runs use. **Don't move signal logic into `main.ts`.**
+
+- `pnpm start` bundles and launches the tray app; `pnpm dev` is the CLI; `pnpm icons` redraws the tray images.
+- **The tray app logs every reading; the CLI gates the same line behind `PERIMETER_DEBUG=1`.** Not an
+  oversight: a packaged tray app has nowhere to print, so seeing it at all means someone launched it
+  from a terminal to watch it. The CLI is the entry a long tuning run pipes to a file, where it would
+  just be noise.
+- **Waking from sleep calls `monitor.reset()`.** Sleep freezes the poll loop instead of failing it, so no
+  dropout is recorded and samples from hours ago would otherwise still be in the window, voting.
+- **The tray images are generated, not drawn** — `scripts/make-tray-icons.mjs` emits them from geometry
+  written in 22pt units. Edit the script, not the PNGs. The `Template` in each filename is what tells
+  macOS to use the alpha as a mask (so the icon inverts on a dark menu bar); `@2x` is the Retina variant.
+- **`main.ts` is bundled with esbuild, not compiled with `tsc`.** That's the other half of
+  `moduleResolution: "Bundler"` — tsc output would leave extensionless relative imports unresolvable.
+  It runs through esbuild's JS API because esbuild's postinstall replaces `bin/esbuild` with a native
+  executable, and a pnpm shim made before that still tries to run it through node.
+- **Launching from a terminal inside another Electron app** (VS Code, Claude Code) inherits
+  `ELECTRON_RUN_AS_NODE=1`, which makes the binary behave as plain Node — `require("electron")` then
+  returns a path string and `app` is undefined. `pnpm start` clears it.
+
 ## Architecture rules
 
 **The menu bar app posts presence *transitions* (immediately) plus a 60s heartbeat of the current state — never raw RSSI.** The API sees `present`/`away` events, optionally with a smoothed value as debug telemetry. Edge detection happens in the filter's debounce, so the API never has to detect edges itself.
@@ -77,13 +101,14 @@ Those two carry their own `cause` (`cold-start`, `bluetooth-off`) rather than `d
 
 - **Comments explain why, not what.** Don't narrate what the code does or restate an identifier in a doc comment — a reader has the code. Write one only for something the code can't show: where a tuned number came from, an approach that was tried and rejected, an empirical fact like the −69 spike. When one is warranted, keep it to a line or two.
 - **pnpm, not npm.** pnpm ignores the `workspaces` field in `package.json` and reads `pnpm-workspace.yaml`.
+- **pnpm 10 blocks postinstall scripts** unless the package is in `onlyBuiltDependencies`. Electron's postinstall is what downloads the actual binary, so without it the install reports success and `electron .` fails.
 - `tsconfig.base.json` holds only genuinely shared options. `target`/`lib`/`module`/`moduleResolution` belong in each app's own tsconfig — they legitimately differ (Electron main is Node, website is DOM).
 - `noUncheckedIndexedAccess` is on deliberately. The sliding-window filter indexes into a partially-filled array; this flag is what forces the startup case to be handled.
 - `moduleResolution: "Bundler"` in menu-bar, chosen over `NodeNext` to avoid `.js` extensions on relative imports.
 
 ## Not yet, on purpose
 
-- **No Electron.** `apps/menu-bar` is a plain TS CLI until the filter is correct. The filter is a pure function over numbers and is tested against the recorded RSSI log; an Electron tray icon can't be tested that way.
+- **No `apps/api` yet**, so the menu bar has no HTTP client and no 60s heartbeat — both halves of that contract get built together, against a real endpoint, rather than guessed at now. The seam is the `TODO` in `onEvent`, in both `index.ts` and `main.ts`.
 - **No `packages/shared-types`.** Create it when a type would otherwise be copy-pasted into a second app, not before. When created, decide the consumption model: no-build `"types": "./src/index.ts"` works for Vite and bundlers but breaks a plain `tsc` build of the API.
 - **Phase 2 (website blocking via `/etc/hosts`) is not started.** Don't build toward it yet.
 

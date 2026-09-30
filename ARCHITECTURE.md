@@ -116,14 +116,48 @@ The contract is therefore: **the menu bar app posts debounced presence transitio
 ### Module layout
 
 ```
-apps/menu-bar/src/
-├── sampler.ts   # system_profiler → one reading, or the reason there isn't one
-├── filter.ts    # RSSI numbers → debounced presence transitions
-├── monitor.ts   # poll cadence + dropout policy → presence events
-└── index.ts     # wiring: config, logging, and where the POST to the API will go
+apps/menu-bar/
+├── src/
+│   ├── sampler.ts       # system_profiler → one reading, or the reason there isn't one
+│   ├── filter.ts        # RSSI numbers → debounced presence transitions
+│   ├── monitor.ts       # poll cadence + dropout policy → presence events
+│   ├── presentation.ts  # presence event → what the user is shown (icon, status line, nudge)
+│   ├── tray.ts          # the menu's shape, as data
+│   ├── main.ts          # Electron entry: tray, notifications, lifecycle
+│   └── index.ts         # headless CLI entry — what tuning runs use
+└── scripts/             # tray icon generator, esbuild bundle
 ```
 
+The first four are plain TypeScript with no Electron import, which is what keeps the filter testable
+against the recorded RSSI log and keeps the CLI usable for a tuning run. `presentation.ts` and
+`tray.ts` sit on the same principle one layer up: both are pure, `tray.ts` reaches electron for types
+only, and the impure Electron surface is confined to `main.ts`.
+
 Each layer keeps a pure core apart from its impure edge: `parseRssi` is pure and only `readRssi` runs a process; `advance` holds the whole dropout policy and only `startMonitor` touches the clock. That's what lets the policy be tested without hardware and without waiting in real time, the same way the filter is tested against the recorded RSSI log.
+
+### The Electron shell
+
+Tray-only: no window is ever created, no Dock icon, and settings open in the browser via
+`shell.openExternal`. What the shell adds over the CLI is a visible state, a notification, and three
+pieces of lifecycle the CLI never needed:
+
+- **A single-instance lock.** Two copies polling the same device would halve the spacing the window
+  and debounce are tuned against, so the second instance exits.
+- **A window reset on wake.** Sleep freezes the poll loop rather than failing it, so no dropout is
+  recorded and pre-sleep samples survive in the window. `powerMonitor`'s `resume` clears it, keeping
+  the last verified state — the same thing the dropout path does, for the same reason. The API
+  notices the gap separately, from missed heartbeats.
+- **Local notifications, for `unknown` only.** That is the one case the sensor cannot resolve by
+  itself, so it goes to the user immediately, and the Mac-radio-off variant offers to open Bluetooth
+  settings. `present` during a session also deserves a nudge, but that depends on active hours,
+  breaks and a cooldown, so it waits on the API's `{ notify }` — the app decides nothing about it.
+
+`unknown` splits three ways in the UI (`bluetooth-off`, `cold-start`, `dropout`) even though it is
+one state to the API. They need three different things from the user, and a tray that said only
+"unknown" would leave them guessing which.
+
+The menu has no pause or break item, and a test asserts it stays that way: breaks are website-only
+because the friction is the feature.
 
 One cadence detail that matters: **the next poll is scheduled after the previous one completes**, not on a `setInterval`. The window size and debounce are tuned against evenly spaced samples, and a fixed interval can overlap invocations if one runs slow — which silently changes the spacing the tuning assumes.
 

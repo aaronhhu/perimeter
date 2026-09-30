@@ -3,8 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "productName": "Perimeter",
+  "main": "dist/main.cjs",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "start": "pnpm bundle && env -u ELECTRON_RUN_AS_NODE electron .",
+    "bundle": "node scripts/bundle.mjs",
+    "icons": "node scripts/make-tray-icons.mjs",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run"
+  },
+  "devDependencies": {
+    "electron": "^44.5.0",
+    "esbuild": "^0.28.2"
   }
 }

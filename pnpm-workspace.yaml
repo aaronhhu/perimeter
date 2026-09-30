@@ -1,3 +1,9 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+# pnpm 10 blocks postinstall scripts unless a package is listed here. Electron's postinstall is what
+# downloads the actual binary, so without this the install looks clean and `electron .` fails.
+onlyBuiltDependencies:
+  - electron
+  - esbuild
