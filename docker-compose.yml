@@ -1,0 +1,22 @@
+# Local development only. Production Postgres is a managed service, and nothing else runs in Docker.
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: perimeter
+      POSTGRES_PASSWORD: perimeter
+      POSTGRES_DB: perimeter
+    ports:
+      - "5432:5432"
+    volumes:
+      # 18+ keeps its data in a versioned subdirectory, so the volume mounts the parent; mounting
+      # /var/lib/postgresql/data as older images expect makes the container refuse to start.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U perimeter -d perimeter"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  pgdata:
