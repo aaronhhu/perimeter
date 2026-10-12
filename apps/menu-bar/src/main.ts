@@ -6,9 +6,10 @@ import {
   type MonitorHandle,
   type MonitorState,
   type PresenceEvent,
+  type ReportedPresence,
 } from "./monitor";
 import { DEFAULT_DEVICE } from "./sampler";
-import { sendPresenceEvent } from "./api";
+import { sendPresenceEvent, startHeartbeat } from "./api";
 import { nudgeFor, STARTING, iconName, tooltip, viewOf, type StatusView } from "./presentation";
 import { trayMenu } from "./tray";
 
@@ -91,6 +92,7 @@ function start(): void {
 
   render();
 
+  let current: ReportedPresence | null = null;
   let reminder: NodeJS.Timeout | undefined;
   const cancelReminder = (): void => clearInterval(reminder);
 
@@ -98,6 +100,7 @@ function start(): void {
     device,
     config,
     onEvent: (event) => {
+      current = event.presence;
       void sendPresenceEvent(apiUrl, event, new Date()).then((result) => {
         if (!result.ok) console.warn(`${stamp()}  event not sent, dropped (${result.reason})`);
       });
@@ -112,8 +115,8 @@ function start(): void {
       }
       console.log(`${stamp()}  → ${event.presence.toUpperCase()} (${event.cause})`);
 
-      // TODO: a 60s heartbeat of the current state. Its response's `{ notify }` then replaces the
-      // unconditional `present` nudge in `nudgeFor`.
+      // TODO: once the API has session rules, the heartbeat's `{ notify }` replaces the unconditional
+      // `present` nudge in `nudgeFor`. Until then it's always false, so it's ignored.
     },
     onReading: (reading, monitorState) => {
       // Ungated, unlike the CLI's equivalent: a packaged tray app has nowhere to print, so this only
@@ -126,6 +129,12 @@ function start(): void {
     },
     onError: (error) => console.error(`${stamp()}  handler failed:`, error),
   });
+
+  const stopHeartbeat = startHeartbeat(
+    apiUrl,
+    () => current,
+    (reason) => console.warn(`${stamp()}  heartbeat not sent (${reason})`),
+  );
 
   const { pollIntervalMs, filter, dropoutSamples } = config;
   console.log(
@@ -144,6 +153,7 @@ function start(): void {
 
   app.on("will-quit", () => {
     cancelReminder();
+    stopHeartbeat();
     monitor.stop();
   });
 }

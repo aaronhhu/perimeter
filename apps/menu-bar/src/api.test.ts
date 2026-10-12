@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { sendPresenceEvent } from "./api";
+import { sendHeartbeat, sendPresenceEvent } from "./api";
 import type { PresenceEvent } from "./monitor";
 
 const API = "http://localhost:3000";
@@ -44,5 +44,25 @@ describe("sendPresenceEvent", () => {
     });
 
     expect(await sendPresenceEvent(API, signal, AT, fetchImpl)).toEqual({ ok: false, reason: "fetch failed" });
+  });
+});
+
+describe("sendHeartbeat", () => {
+  it("posts the current state and returns the API's notify decision", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ notify: false }));
+
+    expect(await sendHeartbeat(API, "away", AT, fetchImpl)).toEqual({ ok: true, notify: false });
+
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toBe("http://localhost:3000/heartbeat");
+    expect(JSON.parse(init.body as string)).toEqual({ presence: "away", sentAt: "2026-10-11T22:15:00.000Z" });
+  });
+
+  it("sends null presence before the first verdict", async () => {
+    const fetchImpl = vi.fn(async () => Response.json({ notify: false }));
+    await sendHeartbeat(API, null, AT, fetchImpl);
+
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(JSON.parse(init.body as string)).toMatchObject({ presence: null });
   });
 });

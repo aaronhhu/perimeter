@@ -1,11 +1,13 @@
 import express from "express";
 import { config } from "./config";
 import { pool } from "./db";
+import { heartbeatRouter } from "./routes/heartbeat";
 import { presenceRouter } from "./routes/presence";
 
 const app = express();
 app.use(express.json());
 app.use(presenceRouter);
+app.use(heartbeatRouter);
 
 app.get("/health", async (_req, res) => {
   try {

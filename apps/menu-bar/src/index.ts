@@ -1,5 +1,11 @@
-import { sendPresenceEvent } from "./api";
-import { DEFAULT_MONITOR_CONFIG, startMonitor, type MonitorState, type PresenceEvent } from "./monitor";
+import { sendPresenceEvent, startHeartbeat } from "./api";
+import {
+  DEFAULT_MONITOR_CONFIG,
+  startMonitor,
+  type MonitorState,
+  type PresenceEvent,
+  type ReportedPresence,
+} from "./monitor";
 import { DEFAULT_DEVICE, type Reading } from "./sampler";
 
 const device = { address: process.env["PERIMETER_IPHONE_ADDRESS"] ?? DEFAULT_DEVICE.address };
@@ -9,7 +15,10 @@ const apiUrl = process.env["PERIMETER_API_URL"] ?? "http://localhost:3000";
 /** Local, not UTC: these logs get read next to a wall clock. */
 const stamp = () => new Date().toTimeString().slice(0, 8);
 
+let current: ReportedPresence | null = null;
+
 function onEvent(event: PresenceEvent): void {
+  current = event.presence;
   void sendPresenceEvent(apiUrl, event, new Date()).then((result) => {
     if (!result.ok) console.warn(`${stamp()}  event not sent, dropped (${result.reason})`);
   });
@@ -52,6 +61,12 @@ const monitor = startMonitor({
   onError: (error) => console.error(`${stamp()}  handler failed:`, error),
 });
 
+const stopHeartbeat = startHeartbeat(
+  apiUrl,
+  () => current,
+  (reason) => console.warn(`${stamp()}  heartbeat not sent (${reason})`),
+);
+
 const { pollIntervalMs, filter, dropoutSamples } = DEFAULT_MONITOR_CONFIG;
 console.log(
   `Watching ${device.address} every ${pollIntervalMs / 1000}s ` +
@@ -62,6 +77,7 @@ console.log(
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     monitor.stop();
+    stopHeartbeat();
     console.log(`\n${stamp()}  stopped.`);
     process.exit(0);
   });

@@ -1,10 +1,9 @@
 import { Router } from "express";
 import { z } from "zod";
+import { CURRENT_USER_ID } from "../currentUser";
 import { db } from "../db";
 import { presence, presenceCause, presenceEvents } from "../schema";
-
-// Replaced by the authenticated user once auth exists.
-export const CURRENT_USER_ID = 1;
+import { badRequest } from "./validation";
 
 const presenceValue = z.enum(presence.enumValues);
 const causeValue = z.enum(presenceCause.enumValues);
@@ -31,10 +30,7 @@ export const presenceRouter = Router();
 presenceRouter.post("/presence-events", async (req, res) => {
   const parsed = presenceEvent.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({
-      error: "Invalid presence event",
-      issues: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
-    });
+    badRequest(res, "Invalid presence event", parsed.error);
     return;
   }
 

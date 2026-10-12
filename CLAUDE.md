@@ -112,9 +112,13 @@ headless CLI — that's what tuning runs use. **Don't move signal logic into `ma
   transition** (tray only). A deliberate stand-in: without the API there's no notion of a session,
   active hours or breaks, so for now quitting the app is the pause. When the API lands, its `{ notify }` decides
   instead — don't add session logic to the menu bar to make the stand-in smarter.
-- **No 60s heartbeat yet.** Transitions are posted to `POST /presence-events` (`src/api.ts`, address from
-  `PERIMETER_API_URL`, default `http://localhost:3000`); the heartbeat and its endpoint come next. The
-  seam is the `TODO` in `onEvent` in `main.ts`.
+- **The heartbeat runs, but nothing acts on it yet.** The app posts transitions to `POST /presence-events`
+  and its current state to `POST /heartbeat` every 60s (`src/api.ts`, address from `PERIMETER_API_URL`,
+  default `http://localhost:3000`). The API only records `last_seen_at` and answers `{ notify: false }` —
+  correct, not a stub: without schedule or session tables no session is ever active. Still to build on
+  it: recording a gap over ~2 minutes as `unknown` from the previous `last_seen_at`, catching up a
+  transition the heartbeat shows was dropped, and the real `{ notify }` rules. The app ignores `notify`
+  until then; the seam is the `TODO` in `onEvent` in `main.ts`.
 - **A transition that fails to send is dropped, not retried.** Fine while the API runs on the same Mac:
   the heartbeat will restate the current state within a minute, so a lost event costs only its exact
   time. Not fine once the API is hosted and other users' focus time is counted from these events —

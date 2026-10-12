@@ -197,7 +197,7 @@ perimeter/
 
 1. **iPhone → menu-bar app** — BLE advertisements, RSSI sampled locally via `system_profiler`.
 2. **menu-bar conditions the signal** — median smoothing, hysteresis, debounce — and derives a presence state. A poll that yields no reading is skipped rather than smoothed, and a sustained run of them reads as away.
-3. **menu-bar → api** — a `POST` on every state transition, sent immediately, **plus a heartbeat of the current state every 60s**. Never raw RSSI. (Not wired yet: `apps/api` doesn't exist, so transitions are currently logged at the seam where the POST will go.)
+3. **menu-bar → api** — a `POST` on every state transition, sent immediately, **plus a heartbeat of the current state every 60s**. Never raw RSSI. (Both are wired: `POST /presence-events` and `POST /heartbeat`. The heartbeat's `{ notify }` is always false until session rules exist.)
 4. **api evaluates rules** — is a session active (schedule, manual session, break)? is the phone present? has the nudge interval passed? — and returns a decision (e.g. `{ notify: true }`) in the same response.
 5. **menu-bar → user** — if told to, fires a native macOS notification.
 6. **api ↔ website** — config reads/writes, leaderboard data.
