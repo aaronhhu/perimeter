@@ -1,9 +1,11 @@
 import express from "express";
 import { config } from "./config";
 import { pool } from "./db";
+import { presenceRouter } from "./routes/presence";
 
 const app = express();
 app.use(express.json());
+app.use(presenceRouter);
 
 app.get("/health", async (_req, res) => {
   try {
