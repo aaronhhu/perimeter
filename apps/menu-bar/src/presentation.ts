@@ -37,9 +37,9 @@ export function statusTitle({ status, cause }: StatusView): string {
 
 function unknownTitle(cause: PresenceEvent["cause"] | null): string {
   switch (cause) {
-    case "bluetooth-off":
+    case "bluetooth_off":
       return "Bluetooth is off on this Mac";
-    case "cold-start":
+    case "cold_start":
       return "Haven't seen your phone yet";
     default:
       return "Can't see your phone";
@@ -89,13 +89,13 @@ export function nudgeFor(event: PresenceEvent): Nudge | null {
   if (event.presence !== "unknown") return null;
 
   switch (event.cause) {
-    case "bluetooth-off":
+    case "bluetooth_off":
       return {
         title: "Bluetooth is off",
         body: "Turn it back on — Perimeter can't see your phone without it.",
         offersBluetoothSettings: true,
       };
-    case "cold-start":
+    case "cold_start":
       return {
         title: "Haven't seen your phone yet",
         body: "Nothing counts as focus until it turns up.",

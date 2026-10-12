@@ -61,9 +61,9 @@ The nudge is the enforcement, not a fallback: the one case the sensor can't reso
 
 Built in `advance` (`apps/menu-bar/src/monitor.ts`). `unknown` lives on `ReportedPresence`, not on `Presence` — the filter argues present/away and nothing else, so widening its output type would invent a state it can never reach. A cold start and a Mac with its own Bluetooth off both skip the rule and go straight to `unknown`; neither has an `away` worth keeping.
 
-Those two carry their own `cause` (`cold-start`, `bluetooth-off`) rather than `dropout`, because nothing disappeared in either — and starting a session with the phone already in another room is the *honest* path, probably the most common one. It must not draw the one-tap cheat's accusation. The state is the same and so is the absence of credit; only the wording changes. Turning a `cold-start` into credit can't come from the sensor *at the start* — the leading idea is to settle it when the phone reappears (see "Not yet").
+Those two carry their own `cause` (`cold_start`, `bluetooth_off`) rather than `dropout`, because nothing disappeared in either — and starting a session with the phone already in another room is the *honest* path, probably the most common one. It must not draw the one-tap cheat's accusation. The state is the same and so is the absence of credit; only the wording changes. Turning a `cold_start` into credit can't come from the sensor *at the start* — the leading idea is to settle it when the phone reappears (see "Not yet").
 
-**`cold-start` means never having *seen* the phone, not never having committed a state.** `MonitorState.seen` tracks that separately, because the first verdict takes 6 polls (~30s at 5s) and readings arrive long before it. Keying off `emitted === null` instead left a ~30s hole at launch where flipping Bluetooth off at the desk was reported as a cold start and drew the gentle message — observed with five readings at −36 dBm, then silence one poll short of the commit. A phone that was plainly there and then went quiet is a vanish however early it happens.
+**`cold_start` means never having *seen* the phone, not never having committed a state.** `MonitorState.seen` tracks that separately, because the first verdict takes 6 polls (~30s at 5s) and readings arrive long before it. Keying off `emitted === null` instead left a ~30s hole at launch where flipping Bluetooth off at the desk was reported as a cold start and drew the gentle message — observed with five readings at −36 dBm, then silence one poll short of the commit. A phone that was plainly there and then went quiet is a vanish however early it happens.
 
 ## The menu bar shell
 
@@ -114,7 +114,7 @@ headless CLI — that's what tuning runs use. **Don't move signal logic into `ma
   instead — don't add session logic to the menu bar to make the stand-in smarter.
 - **No `apps/api` yet**, so the menu bar has no HTTP client and no 60s heartbeat — both halves of that contract get built together, against a real endpoint, rather than guessed at now. The seam is the `TODO` in `onEvent`, in both `index.ts` and `main.ts`.
 - **No `packages/shared-types`.** Create it when a type would otherwise be copy-pasted into a second app, not before. When created, decide the consumption model: no-build `"types": "./src/index.ts"` works for Vite and bundlers but breaks a plain `tsc` build of the API.
-- **Crediting an honest `cold-start` is undecided, pending a walk-back test.** The idea mirrors the
+- **Crediting an honest `cold_start` is undecided, pending a walk-back test.** The idea mirrors the
   dropout rule: hold cold-start time as pending, and settle it when the phone first reappears. A phone
   that was genuinely away comes back weak and climbs as it's carried in; one that sat on the desk with
   Bluetooth off reappears strong. That only works if the Mac catches the weak readings, and a brisk

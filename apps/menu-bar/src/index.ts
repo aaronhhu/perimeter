@@ -15,9 +15,9 @@ function onEvent(event: PresenceEvent): void {
   // the one state the Mac can't resolve by itself, so it's the one that has to ask.
   if (event.presence === "unknown") {
     const nudge =
-      event.cause === "bluetooth-off"
+      event.cause === "bluetooth_off"
         ? "Bluetooth is off on this Mac — turn it on to keep tracking."
-        : event.cause === "cold-start"
+        : event.cause === "cold_start"
           ? "Haven't seen your phone yet — nothing counts until it turns up."
           : "Can't see your phone — is Bluetooth off?";
     console.log(`${stamp()}     ${nudge}`);
@@ -28,7 +28,7 @@ function onEvent(event: PresenceEvent): void {
 
   // TODO: POST the transition to apps/api once it exists. Transitions only, never raw RSSI —
   // `smoothed` rides along as optional debug telemetry.
-  // TODO: `cold-start` has no way to resolve into credit yet. The sensor can't, ever — that needs
+  // TODO: `cold_start` has no way to resolve into credit yet. The sensor can't, ever — that needs
   // the user asserting "it's in the other room", which belongs on the website next to pause.
 }
 

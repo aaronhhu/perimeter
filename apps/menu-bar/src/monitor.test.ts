@@ -86,7 +86,7 @@ describe("advance", () => {
   it("reports unknown when the phone was never seen at all", () => {
     // A cold start with the phone already invisible has verified nothing, so it has earned nothing.
     const { events } = run(Array.from({ length: 3 }, dropout));
-    expect(events).toEqual([{ presence: "unknown", smoothed: null, cause: "cold-start" }]);
+    expect(events).toEqual([{ presence: "unknown", smoothed: null, cause: "cold_start" }]);
   });
 
   it("calls it a vanish, not a cold start, when the phone was seen before the first verdict", () => {
@@ -103,7 +103,7 @@ describe("advance", () => {
     const cold = run(Array.from({ length: 3 }, dropout));
     const vanished = run([...DESK.map(ok), dropout(), dropout(), dropout()]);
 
-    expect(cold.events.at(-1)).toMatchObject({ presence: "unknown", cause: "cold-start" });
+    expect(cold.events.at(-1)).toMatchObject({ presence: "unknown", cause: "cold_start" });
     expect(vanished.events.at(-1)).toMatchObject({ presence: "unknown", cause: "dropout" });
   });
 
@@ -112,7 +112,7 @@ describe("advance", () => {
     const walked = run([...DESK, ...AWAY].map(ok));
     const { events } = run(Array.from({ length: 3 }, macRadioOff), CONFIG, walked.state);
 
-    expect(events).toEqual([{ presence: "unknown", smoothed: null, cause: "bluetooth-off" }]);
+    expect(events).toEqual([{ presence: "unknown", smoothed: null, cause: "bluetooth_off" }]);
   });
 
   it("recovers from unknown once the phone is readable again", () => {

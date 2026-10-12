@@ -23,7 +23,7 @@ export interface PresenceEvent {
   readonly presence: ReportedPresence;
   /** Null on a dropout: inventing a value would misreport a sensor failure as a reading. */
   readonly smoothed: number | null;
-  readonly cause: "signal" | "dropout" | "cold-start" | "bluetooth-off";
+  readonly cause: "signal" | "dropout" | "cold_start" | "bluetooth_off";
 }
 
 export interface MonitorState {
@@ -74,13 +74,13 @@ export function advance(state: MonitorState, reading: Reading, config: MonitorCo
 
   // This Mac's own radio says nothing about where the phone is, so no prior state survives it.
   if (reading.reason === "bluetooth-off") {
-    return emit(blacked, { presence: "unknown", smoothed: null, cause: "bluetooth-off" });
+    return emit(blacked, { presence: "unknown", smoothed: null, cause: "bluetooth_off" });
   }
 
   // Never having *seen* the phone, not never having committed a state: the first verdict takes 6
   // polls, and a phone that was plainly there and then went silent is a vanish however early it is.
   if (!state.seen) {
-    return emit(blacked, { presence: "unknown", smoothed: null, cause: "cold-start" });
+    return emit(blacked, { presence: "unknown", smoothed: null, cause: "cold_start" });
   }
 
   // A vanished phone looks the same whether it left or its Bluetooth was switched off, so the state
