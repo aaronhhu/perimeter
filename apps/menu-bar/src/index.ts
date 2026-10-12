@@ -1,13 +1,19 @@
+import { sendPresenceEvent } from "./api";
 import { DEFAULT_MONITOR_CONFIG, startMonitor, type MonitorState, type PresenceEvent } from "./monitor";
 import { DEFAULT_DEVICE, type Reading } from "./sampler";
 
 const device = { address: process.env["PERIMETER_IPHONE_ADDRESS"] ?? DEFAULT_DEVICE.address };
 const debug = process.env["PERIMETER_DEBUG"] === "1";
+const apiUrl = process.env["PERIMETER_API_URL"] ?? "http://localhost:3000";
 
 /** Local, not UTC: these logs get read next to a wall clock. */
 const stamp = () => new Date().toTimeString().slice(0, 8);
 
 function onEvent(event: PresenceEvent): void {
+  void sendPresenceEvent(apiUrl, event, new Date()).then((result) => {
+    if (!result.ok) console.warn(`${stamp()}  event not sent, dropped (${result.reason})`);
+  });
+
   const detail = event.smoothed === null ? event.cause : `${event.cause}, smoothed ${event.smoothed} dBm`;
   console.log(`${stamp()}  → ${event.presence.toUpperCase()} (${detail})`);
 
@@ -26,8 +32,6 @@ function onEvent(event: PresenceEvent): void {
     console.log(`${stamp()}     Your phone is in range — take it out of the perimeter.`);
   }
 
-  // TODO: POST the transition to apps/api once it exists. Transitions only, never raw RSSI —
-  // `smoothed` rides along as optional debug telemetry.
   // TODO: `cold_start` has no way to resolve into credit yet. The sensor can't, ever — that needs
   // the user asserting "it's in the other room", which belongs on the website next to pause.
 }

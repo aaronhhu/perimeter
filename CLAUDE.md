@@ -112,7 +112,15 @@ headless CLI — that's what tuning runs use. **Don't move signal logic into `ma
   transition** (tray only). A deliberate stand-in: without the API there's no notion of a session,
   active hours or breaks, so for now quitting the app is the pause. When the API lands, its `{ notify }` decides
   instead — don't add session logic to the menu bar to make the stand-in smarter.
-- **No `apps/api` yet**, so the menu bar has no HTTP client and no 60s heartbeat — both halves of that contract get built together, against a real endpoint, rather than guessed at now. The seam is the `TODO` in `onEvent`, in both `index.ts` and `main.ts`.
+- **No 60s heartbeat yet.** Transitions are posted to `POST /presence-events` (`src/api.ts`, address from
+  `PERIMETER_API_URL`, default `http://localhost:3000`); the heartbeat and its endpoint come next. The
+  seam is the `TODO` in `onEvent` in `main.ts`.
+- **A transition that fails to send is dropped, not retried.** Fine while the API runs on the same Mac:
+  the heartbeat will restate the current state within a minute, so a lost event costs only its exact
+  time. Not fine once the API is hosted and other users' focus time is counted from these events —
+  retry must exist before then. It needs a queue persisted to disk (an in-memory one dies with the
+  app), sends in order, an id per event so the API can drop a duplicate (a save whose response got
+  lost gets resent), and a cap on the queue's size.
 - **No `packages/shared-types`.** Create it when a type would otherwise be copy-pasted into a second app, not before. When created, decide the consumption model: no-build `"types": "./src/index.ts"` works for Vite and bundlers but breaks a plain `tsc` build of the API.
 - **Crediting an honest `cold_start` is undecided, pending a walk-back test.** The idea mirrors the
   dropout rule: hold cold-start time as pending, and settle it when the phone first reappears. A phone

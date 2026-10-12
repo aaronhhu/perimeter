@@ -8,14 +8,16 @@ import {
   type PresenceEvent,
 } from "./monitor";
 import { DEFAULT_DEVICE } from "./sampler";
+import { sendPresenceEvent } from "./api";
 import { nudgeFor, STARTING, iconName, tooltip, viewOf, type StatusView } from "./presentation";
 import { trayMenu } from "./tray";
 
 const device = { address: process.env["PERIMETER_IPHONE_ADDRESS"] ?? DEFAULT_DEVICE.address };
 
 // TODO: the architecture wants a short-lived token on this URL so opening settings doesn't mean
-// logging in again. Nothing to sign yet — apps/api doesn't exist.
+// logging in again. Nothing to sign with yet — apps/api has no auth.
 const websiteUrl = process.env["PERIMETER_WEBSITE_URL"] ?? "http://localhost:5173";
+const apiUrl = process.env["PERIMETER_API_URL"] ?? "http://localhost:3000";
 
 /** Local, not UTC: these logs get read next to a wall clock. */
 const stamp = () => new Date().toTimeString().slice(0, 8);
@@ -96,6 +98,10 @@ function start(): void {
     device,
     config,
     onEvent: (event) => {
+      void sendPresenceEvent(apiUrl, event, new Date()).then((result) => {
+        if (!result.ok) console.warn(`${stamp()}  event not sent, dropped (${result.reason})`);
+      });
+
       view = viewOf(event);
       render();
       notify(event);
@@ -106,9 +112,8 @@ function start(): void {
       }
       console.log(`${stamp()}  → ${event.presence.toUpperCase()} (${event.cause})`);
 
-      // TODO: POST the transition to apps/api once it exists, plus a 60s heartbeat of the current
-      // state. Transitions only, never raw RSSI — `smoothed` rides along as debug telemetry.
-      // The response's `{ notify }` then replaces the unconditional `present` nudge in `nudgeFor`.
+      // TODO: a 60s heartbeat of the current state. Its response's `{ notify }` then replaces the
+      // unconditional `present` nudge in `nudgeFor`.
     },
     onReading: (reading, monitorState) => {
       // Ungated, unlike the CLI's equivalent: a packaged tray app has nowhere to print, so this only
