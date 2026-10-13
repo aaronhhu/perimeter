@@ -15,6 +15,13 @@
       "when": 1791764460946,
       "tag": "0001_dazzling_forge",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791849181831,
+      "tag": "0002_thick_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,15 @@
 import { doublePrecision, index, integer, pgEnum, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const presence = pgEnum("presence", ["present", "away", "unknown"]);
-export const presenceCause = pgEnum("presence_cause", ["signal", "dropout", "cold_start", "bluetooth_off"]);
+export const presenceCause = pgEnum("presence_cause", [
+  "signal",
+  "dropout",
+  "cold_start",
+  "bluetooth_off",
+  // Recorded by the API itself, never sent by the app.
+  "heartbeat_gap",
+  "heartbeat_resume",
+]);
 
 export const users = pgTable("users", {
   id: integer().primaryKey().generatedAlwaysAsIdentity(),

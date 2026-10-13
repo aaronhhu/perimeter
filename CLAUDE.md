@@ -65,6 +65,24 @@ Those two carry their own `cause` (`cold_start`, `bluetooth_off`) rather than `d
 
 **`cold_start` means never having *seen* the phone, not never having committed a state.** `MonitorState.seen` tracks that separately, because the first verdict takes 6 polls (~30s at 5s) and readings arrive long before it. Keying off `emitted === null` instead left a ~30s hole at launch where flipping Bluetooth off at the desk was reported as a cold start and drew the gentle message — observed with five readings at −36 dBm, then silence one poll short of the commit. A phone that was plainly there and then went quiet is a vanish however early it happens.
 
+## Heartbeat gaps
+
+Any contact from the Mac — heartbeat or event — goes through `recordContact` (`apps/api/src/contact.ts`).
+More than 150s since the last one is a gap, recorded as `unknown` / `heartbeat_gap` at the old
+`last_seen_at`: one missed 60s beat is forgiven, two are not. A Mac asleep, an app not running and an
+API that was down are indistinguishable from the server, and none can vouch for the phone, so all
+three cost credit.
+
+A heartbeat that ends a gap also writes its presence back as `heartbeat_resume`. The app only sends
+changes, and a Mac waking with the phone where it left it changes nothing, so without that the
+timeline would read `unknown` until the phone next moved. Not after a relaunch: the app's presence is
+null until its first verdict, which arrives as a normal event. Known cost: the resumed state is the
+app's pre-sleep belief, unverified — if the phone moved during sleep, up to ~30s is misattributed
+before the filter's first verdict corrects it.
+
+Both causes are API-only; `POST /presence-events` rejects them. The user row is locked
+(`FOR UPDATE`) so a heartbeat and an event arriving together can't record the same gap twice.
+
 ## The menu bar shell
 
 Electron is the shell and nothing more. `sampler`/`filter`/`monitor` import no Electron API, so the
@@ -112,13 +130,12 @@ headless CLI — that's what tuning runs use. **Don't move signal logic into `ma
   transition** (tray only). A deliberate stand-in: without the API there's no notion of a session,
   active hours or breaks, so for now quitting the app is the pause. When the API lands, its `{ notify }` decides
   instead — don't add session logic to the menu bar to make the stand-in smarter.
-- **The heartbeat runs, but nothing acts on it yet.** The app posts transitions to `POST /presence-events`
-  and its current state to `POST /heartbeat` every 60s (`src/api.ts`, address from `PERIMETER_API_URL`,
-  default `http://localhost:3000`). The API only records `last_seen_at` and answers `{ notify: false }` —
-  correct, not a stub: without schedule or session tables no session is ever active. Still to build on
-  it: recording a gap over ~2 minutes as `unknown` from the previous `last_seen_at`, catching up a
-  transition the heartbeat shows was dropped, and the real `{ notify }` rules. The app ignores `notify`
-  until then; the seam is the `TODO` in `onEvent` in `main.ts`.
+- **The heartbeat records gaps, but nothing else acts on it yet.** The app posts transitions to
+  `POST /presence-events` and its current state to `POST /heartbeat` every 60s (`src/api.ts`, address
+  from `PERIMETER_API_URL`, default `http://localhost:3000`). Still to build on it: catching up a
+  transition the heartbeat shows was dropped, and the real `{ notify }` rules. It answers
+  `{ notify: false }` until then — correct, not a stub: without schedule or session tables no session
+  is ever active — and the app ignores it; the seam is the `TODO` in `onEvent` in `main.ts`.
 - **A transition that fails to send is dropped, not retried.** Fine while the API runs on the same Mac:
   the heartbeat will restate the current state within a minute, so a lost event costs only its exact
   time. Not fine once the API is hosted and other users' focus time is counted from these events —
