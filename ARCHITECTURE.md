@@ -200,7 +200,7 @@ perimeter/
 3. **menu-bar → api** — a `POST` on every state transition, sent immediately, **plus a heartbeat of the current state every 60s**. Never raw RSSI. (Both are wired: `POST /presence-events` and `POST /heartbeat`. The heartbeat's `{ notify }` is always false until session rules exist.)
 4. **api evaluates rules** — is a session active (schedule, manual session, break)? is the phone present? has the nudge interval passed? — and returns a decision (e.g. `{ notify: true }`) in the same response.
 5. **menu-bar → user** — if told to, fires a native macOS notification.
-6. **api ↔ website** — config reads/writes, leaderboard data.
+6. **api ↔ website** — config reads/writes, leaderboard data. (Wired so far: `GET /timeline?date=`, one day of events in the user's timezone, read by the website through a Vite dev proxy at `/api`.)
 7. **menu-bar → website** — a "Settings" item opens the site (`shell.openExternal`), ideally with a short-lived token in the URL so the user doesn't have to log in again.
 
 Edge detection happens as part of debouncing in step 2, so the API receives transitions by construction rather than having to detect them. The heartbeat exists because some nudges happen when *nothing changes* — the phone was already on the desk when the session started, or it just stays there. Notification timing stays in the API, where it belongs — it's a rule, not physics.
