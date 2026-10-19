@@ -93,7 +93,8 @@ headless CLI — that's what tuning runs use. **Don't move signal logic into `ma
 - **The tray app logs every reading; the CLI gates the same line behind `PERIMETER_DEBUG=1`.** Not an
   oversight: a packaged tray app has nowhere to print, so seeing it at all means someone launched it
   from a terminal to watch it. The CLI is the entry a long tuning run pipes to a file, where it would
-  just be noise.
+  just be noise. Failed readings go to stderr, so capture with `2>&1 | tee run.log` or they vanish from
+  the file and leave unexplained time jumps.
 - **Waking from sleep calls `monitor.reset()`.** Sleep freezes the poll loop instead of failing it, so no
   dropout is recorded and samples from hours ago would otherwise still be in the window, voting.
 - **The tray images are generated, not drawn** — `scripts/make-tray-icons.mjs` emits them from geometry
@@ -143,14 +144,23 @@ headless CLI — that's what tuning runs use. **Don't move signal logic into `ma
   app), sends in order, an id per event so the API can drop a duplicate (a save whose response got
   lost gets resent), and a cap on the queue's size.
 - **No `packages/shared-types`.** Create it when a type would otherwise be copy-pasted into a second app, not before. When created, decide the consumption model: no-build `"types": "./src/index.ts"` works for Vite and bundlers but breaks a plain `tsc` build of the API.
-- **Crediting an honest `cold_start` is undecided, pending a walk-back test.** The idea mirrors the
-  dropout rule: hold cold-start time as pending, and settle it when the phone first reappears. A phone
-  that was genuinely away comes back weak and climbs as it's carried in; one that sat on the desk with
-  Bluetooth off reappears strong. That only works if the Mac catches the weak readings, and a brisk
-  walk from out of range may span just one or two 5s polls. So first: start out of range, walk back
-  at normal speed, log the first readings. If they reliably start weak, the menu bar needs to report
-  that first reading, since the filter's median at commit hides it. Preferred over an "it's in the
-  other room" button, which is honor-based.
+- **Crediting an honest `cold_start` is not built; the walk-back test (2026-10-17) supports it.** The
+  idea mirrors the dropout rule: hold the unknown time as pending and settle it on the phone's *first*
+  reading after the silence. Carried back from out of range, that reading came back weak twice (−79
+  then −74, −72 then −60, before −40 at the desk — about 10s of weak readings at a normal walk). Bluetooth
+  switched off and on at the desk came back at −50 on its first reading. The thresholds already split
+  them: below `awayBelow` credits, above `presentAbove` doesn't, the dead zone doesn't either. The
+  first reading after the gap was fresh (−50, not the −39 echoed before the dropout), so it can be
+  trusted. Three trials, not proven — repeat each a few times, including a brisk walk, before relying
+  on it. The menu bar must report that first reading, since the filter's median at commit hides it.
+  Same rule could settle a `dropout` from `present` and remove its known false positive (a phone that
+  left before `away` committed comes back weak). Uncaught: Bluetooth turned on while still far away,
+  then carried back — deliberate and multi-step, the bar the dropout rule already accepts. Preferred
+  over an "it's in the other room" button, which is honor-based.
+- **A phone heard only weakly, then lost, draws the "is Bluetooth off?" nudge.** Seen in the walk-back
+  test: launched with the phone at −85, five readings filled the window but went silent one poll short
+  of committing `away`, so `seen` made it a `dropout`. The phone was genuinely far. The first-reading
+  rule above would settle it; until then it's a known false positive alongside the fast-exit one.
 - **Phase 2 (website blocking via `/etc/hosts`) is not started.** Don't build toward it yet.
 
 ## Working style
