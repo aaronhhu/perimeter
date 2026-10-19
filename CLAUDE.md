@@ -1,167 +1,78 @@
 # Perimeter
 
-Bluetooth proximity drives a focus/accountability session: the Mac senses how close the user's iPhone is. `present`/`away` describe the **phone**, not the user — focus means the phone is away during active hours. (Planned: also require recent keyboard/mouse activity via `HIDIdleTime`, so time away from the Mac doesn't count as focus.) Menu bar app + Express API + React website. No companion iOS app.
+Bluetooth proximity drives a focus/accountability session: the Mac senses how close the user's iPhone is. `present`/`away` describe the **phone**, not the user — focus means the phone is away during an active session. Menu bar app (Electron) + Express API (Postgres/Drizzle) + React website. No companion iOS app.
 
-Full design rationale is in `ARCHITECTURE.md`. This file is the short list of things that are easy to get wrong.
+This file is the short list of things that are easy to get wrong. The rest lives elsewhere:
 
-## Do not suggest these — all three were tested and rejected
+- **`ARCHITECTURE.md`** — how it works and why it was designed that way.
+- **`docs/findings.md`** — dated test results and measurements, the evidence behind the rules here.
 
-**`blueutil --is-connected`, or any classic Bluetooth connection check.** This is the obvious answer and it does not work. The iPhone *is* paired (it's listed in `blueutil --paired`), but iOS refuses a classic Bluetooth connection to a Mac — connecting from the iPhone fails with "'<Mac name>' is not supported". So `--is-connected` returns 0 permanently, at any distance, even with the phone touching the laptop. Connection state is useless; the pairing is not — see below.
+**Where new things go:** a test result goes in `docs/findings.md`, with its date and numbers. If it changes how code should be written, add the *rule* here in a line or two and point to the finding. Design goes in `ARCHITECTURE.md`. Don't record build progress here — it goes stale, and a stale line here gets trusted.
 
-**Raw BLE scanning for the phone's address.** iOS rotates its BLE MAC roughly every 15 minutes. Resolving it requires the identity resolving key from a bond. Not needed here — the existing pairing already gives the Mac that key. See below.
+## Do not suggest these — tested and rejected
 
-**Wi-Fi presence (ping / ARP table).** Range is the whole building. The mechanic needs desk-scale granularity; "phone is in the kitchen" must read as away, and Wi-Fi can't tell the kitchen from the desk.
+- **`blueutil --is-connected`, or any classic Bluetooth connection check.** iOS refuses a classic connection to a Mac, so it reads "not connected" at any distance, even touching the laptop.
+- **Raw BLE scanning for the phone's address.** iOS rotates it about every 15 minutes, and the existing pairing already resolves it.
+- **Wi-Fi presence (ping / ARP).** The range is the whole building; it can't tell the kitchen from the desk.
 
-## The actual signal
+## The signal
 
-`system_profiler SPBluetoothDataType` reports an RSSI for the iPhone, read from the BLE advertisements it broadcasts continuously for Continuity. That's one-way broadcast, not a connection, which is why it works when `--is-connected` can't.
+The signal is the iPhone's RSSI from `system_profiler SPBluetoothDataType`, read from the BLE advertisements it broadcasts for Continuity. That's a one-way broadcast, not a connection.
 
-**Never unpair the iPhone, and never suggest it.** The pairing bond is what makes the RSSI usable: it supplies the identity resolving key that lets the Mac map the phone's rotating BLE address back to this specific device. Without it there's no stable identity to attach a reading to, and presence detection breaks. iOS suggests forgetting the device when a connection attempt fails — don't, on either device.
+- **Never unpair the iPhone, and never suggest it.** The pairing bond is what lets the Mac map the phone's rotating address back to this device. iOS suggests forgetting the device after a failed connection — don't, on either device.
+- **A single raw sample must never change state.** A −69 was recorded with the phone untouched on the desk. Median smoothing plus debounce exists because of that sample.
+- **Don't "optimize" away the detection latency** (~4 polls, 20s at 5s). It's the cost of not firing on noise.
+- **The poll interval is 5s, on trial.** It still needs a 30+ minute run before it's final (`docs/findings.md`, 2026-09-29). Faster polling does *not* speed up the dropout path — the ~30–45s Bluetooth-off echo is wall-clock.
+- **Don't build staleness detection** ("identical value for N polls"). A frozen value doesn't persist; the field drops out and becomes `rssi-absent`.
+- **`rssi-absent` is ambiguous.** A phone out of range and a phone on the desk with Bluetooth off look identical. That's handled by the dropout rule below, not in the sampler.
+- **`device-absent` never means distance.** The device list comes from pairing records, so a far-away phone is still listed. It means a wrong address or a broken pairing.
+- **Thresholds are environment-specific** (one room, one Mac, one phone). They live in config.
 
-Verified over a 35-minute idle run (138 samples): values keep updating, no staleness, no drift. Measured ranges: at-desk −38 to −52, out-of-room −68 to −79, with a clean empty gap between.
+## Presence states
 
-Tuned parameters, validated by simulation against the real idle log (zero false transitions):
+- **A dropout keeps the last *verified* state.** Last verified `away` stays `away`; last verified `present` becomes `unknown` plus an "is Bluetooth off?" nudge. Built in `advance` (`apps/menu-bar/src/monitor.ts`).
+- **`unknown` lives on `ReportedPresence`, not `Presence`.** The filter only ever argues present/away; don't widen its type.
+- **`cold_start` and `bluetooth_off` are their own causes, not `dropout`.** Starting with the phone already in another room is the honest path and mustn't get the cheat's wording.
+- **`cold_start` means never having *seen* the phone** (`MonitorState.seen`), not "no state committed yet". Readings arrive ~30s before the first verdict.
+- **Unknown time never counts as focus.** Crediting an honest cold start is planned, not built (`ARCHITECTURE.md`, *Dropouts and unknown time*).
 
-- Poll interval: 5s — provisional; the one value the idle log does *not* validate, see below
-- Median window: 5 samples
-- Debounce: 2 consecutive
-- Present → Away below −65; Away → Present above −55
+## API
 
-Detection latency is ~4 polls by design — 20s at 5s, 40s at 10s. Do not "optimize" this away — it's the cost of not firing on noise.
-
-**The poll interval is 5s, on trial.** A 4-minute run at 5s (2026-09-29) cleared the one blocking question: `system_profiler` does refresh at that rate. Values changed on 63% of polls with runs of 1–3, nothing like the 3× duplication that would have made the median vote on one physical reading three times. Signal-path latency halved as intended — cold start and post-blackout recovery both confirmed `present` in 26s against 52s at 10s.
-
-Two things it did *not* settle, and both want a 30+ minute run before 5s is called final:
-
-- **A spike landing inside a hold.** Replaying the real −69 desk spike: held for 1 or 2 polls the filter absorbs it, held for 3 it commits a false `away`. The 5s run produced 3-runs but contained no spike (the 35-minute log had two, so 4 minutes is simply too short). The failure now needs both to coincide — a probability, not an impossibility.
-- **Effective window shrinkage.** 21 distinct values across 33 polls is ~3.2 independent samples per 5-wide window, down from ~4.6 at 15s spacing.
-
-Faster polling does *not* speed up the dropout path, so don't expect it to: freeze-to-nudge measured 56s at 5s against ~60s at 10s. The echo dominates and is wall-clock; only `dropoutSamples` scales.
-
-**Stale RSSI resolved — no staleness detection needed.** Tested on both Wi-Fi and hotspot: with iPhone Bluetooth off, `system_profiler` keeps serving the last known RSSI, then drops the `device_rssi` field entirely, which the sampler already reports as `rssi-absent`. **The echo is wall-clock, not poll-count** — ~30–45s, seen as 9 identical repeats at a 5s poll; the earlier "~3 polls" was an artifact of only ever measuring at 10s. A frozen value still does not persist, so the planned "identical value for N consecutive polls" heuristic remains unnecessary — don't build it. Cost is latency: ~45s of stale repeats, then `dropoutSamples`, so ~75s total.
-
-**`rssi-absent` is ambiguous, and that's the real loophole.** A phone out of range produces exactly the same `rssi-absent` as a phone on the desk with Bluetooth off — both halves now observed directly, not assumed. The symptom alone cannot tell genuine focus from gaming the session. See dropout handling below — the fix is not in the sampler.
-
-**`device-absent` is not the way out of that, so don't reach for it.** The device list is built from pairing records, not from what's currently reachable: anything ever paired stays listed forever, which is why the AirPods sit in it with no `device_rssi` at all. A far-away phone is therefore still listed, and still `rssi-absent`. `device-absent` means a wrong address in config or a broken pairing — it can never mean distance. The whole entry is six fields (`device_address`, `device_firmwareVersion`, `device_minorType`, `device_productID`, `device_rssi`, `device_vendorID`): no timestamp, no last-seen, nothing else to infer from.
-
-**A single raw sample must never change state.** A −69 was recorded with the phone sitting untouched on the desk, which is past the away threshold. Median smoothing plus debounce exists specifically because of that observed sample, not as a precaution.
-
-That invariant is weaker at 5s than it was at 10s, and it's worth knowing why. A 30–45s frozen echo is 9 samples at 5s — enough to fill the 5-wide window completely, so the filter can commit a transition on what is physically one measurement. At 10s an echo was 3 samples and could never outvote the window. Harmless when the frozen value is deep in present territory, as observed; not harmless if a freeze ever captures a value near a threshold.
-
-**Thresholds are environment-specific.** Calibrated to one room, one Mac, one phone. They live in config. A calibration flow is a known future need.
-
-## Dropout handling
-
-Distance is gradual, a switch is abrupt. Walking away decays the RSSI through −65 and confirms `away` *before* the signal vanishes; killing Bluetooth at the desk jumps from a strong reading straight to absent. The endpoint is ambiguous but the path into it is not, so a dropout keeps the last *verified* state:
-
-- last verified `away` → stays `away`, counts as focus
-- last verified `present` → `unknown` + "is Bluetooth off?" nudge
-
-The nudge is the enforcement, not a fallback: the one case the sensor can't resolve gets handed to the user. Known false positive — leaving fast enough to go `present` → absent without ever confirming `away` earns a spurious nudge.
-
-Built in `advance` (`apps/menu-bar/src/monitor.ts`). `unknown` lives on `ReportedPresence`, not on `Presence` — the filter argues present/away and nothing else, so widening its output type would invent a state it can never reach. A cold start and a Mac with its own Bluetooth off both skip the rule and go straight to `unknown`; neither has an `away` worth keeping.
-
-Those two carry their own `cause` (`cold_start`, `bluetooth_off`) rather than `dropout`, because nothing disappeared in either — and starting a session with the phone already in another room is the *honest* path, probably the most common one. It must not draw the one-tap cheat's accusation. The state is the same and so is the absence of credit; only the wording changes. Turning a `cold_start` into credit can't come from the sensor *at the start* — the leading idea is to settle it when the phone reappears (see "Not yet").
-
-**`cold_start` means never having *seen* the phone, not never having committed a state.** `MonitorState.seen` tracks that separately, because the first verdict takes 6 polls (~30s at 5s) and readings arrive long before it. Keying off `emitted === null` instead left a ~30s hole at launch where flipping Bluetooth off at the desk was reported as a cold start and drew the gentle message — observed with five readings at −36 dBm, then silence one poll short of the commit. A phone that was plainly there and then went quiet is a vanish however early it happens.
-
-## Heartbeat gaps
-
-Any contact from the Mac — heartbeat or event — goes through `recordContact` (`apps/api/src/contact.ts`).
-More than 150s since the last one is a gap, recorded as `unknown` / `heartbeat_gap` at the old
-`last_seen_at`: one missed 60s beat is forgiven, two are not. A Mac asleep, an app not running and an
-API that was down are indistinguishable from the server, and none can vouch for the phone, so all
-three cost credit.
-
-A heartbeat that ends a gap also writes its presence back as `heartbeat_resume`. The app only sends
-changes, and a Mac waking with the phone where it left it changes nothing, so without that the
-timeline would read `unknown` until the phone next moved. Not after a relaunch: the app's presence is
-null until its first verdict, which arrives as a normal event. Known cost: the resumed state is the
-app's pre-sleep belief, unverified — if the phone moved during sleep, up to ~30s is misattributed
-before the filter's first verdict corrects it.
-
-Both causes are API-only; `POST /presence-events` rejects them. The user row is locked
-(`FOR UPDATE`) so a heartbeat and an event arriving together can't record the same gap twice.
+- **The menu bar posts transitions immediately, plus a 60s heartbeat — never raw RSSI.** `smoothed` rides along as debug telemetry. Edge detection happens in the filter's debounce, never in the API.
+- **All business logic lives in the API** — sessions, breaks, notification decisions, cooldowns. The one exception is signal conditioning, which is device physics and stays in the menu bar.
+- **Every contact from the Mac goes through `recordContact`** (`apps/api/src/contact.ts`). That's what records heartbeat gaps. A new route that hears from the Mac must call it.
+- **`heartbeat_gap` and `heartbeat_resume` are API-only causes.** `POST /presence-events` must keep rejecting them.
+- **Request validation derives its enums from the Drizzle `pgEnum`s.** Never retype the values.
+- **Pause is website-only on purpose.** The friction is the feature. Don't add a menu-bar pause shortcut.
+- **Until auth exists, every route uses `CURRENT_USER_ID`** (`apps/api/src/currentUser.ts`).
 
 ## The menu bar shell
 
-Electron is the shell and nothing more. `sampler`/`filter`/`monitor` import no Electron API, so the
-filter stays a pure function tested against the recorded RSSI log, and `pnpm dev` still runs the
-headless CLI — that's what tuning runs use. **Don't move signal logic into `main.ts`.**
-
+- **Electron is the shell and nothing more.** `sampler`/`filter`/`monitor` import no Electron API, so they stay testable and `pnpm dev` still runs the headless CLI. **Don't move signal logic into `main.ts`.**
 - `pnpm start` bundles and launches the tray app; `pnpm dev` is the CLI; `pnpm icons` redraws the tray images.
-- **The tray app logs every reading; the CLI gates the same line behind `PERIMETER_DEBUG=1`.** Not an
-  oversight: a packaged tray app has nowhere to print, so seeing it at all means someone launched it
-  from a terminal to watch it. The CLI is the entry a long tuning run pipes to a file, where it would
-  just be noise. Failed readings go to stderr, so capture with `2>&1 | tee run.log` or they vanish from
-  the file and leave unexplained time jumps.
-- **Waking from sleep calls `monitor.reset()`.** Sleep freezes the poll loop instead of failing it, so no
-  dropout is recorded and samples from hours ago would otherwise still be in the window, voting.
-- **The tray images are generated, not drawn** — `scripts/make-tray-icons.mjs` emits them from geometry
-  written in 22pt units. Edit the script, not the PNGs. The `Template` in each filename is what tells
-  macOS to use the alpha as a mask (so the icon inverts on a dark menu bar); `@2x` is the Retina variant.
-- **`main.ts` is bundled with esbuild, not compiled with `tsc`.** That's the other half of
-  `moduleResolution: "Bundler"` — tsc output would leave extensionless relative imports unresolvable.
-  It runs through esbuild's JS API because esbuild's postinstall replaces `bin/esbuild` with a native
-  executable, and a pnpm shim made before that still tries to run it through node.
-- **Launching from a terminal inside another Electron app** (VS Code, Claude Code) inherits
-  `ELECTRON_RUN_AS_NODE=1`, which makes the binary behave as plain Node — `require("electron")` then
-  returns a path string and `app` is undefined. `pnpm start` clears it.
-
-## Architecture rules
-
-**The menu bar app posts presence *transitions* (immediately) plus a 60s heartbeat of the current state — never raw RSSI.** The API sees `present`/`away` events, optionally with a smoothed value as debug telemetry. Edge detection happens in the filter's debounce, so the API never has to detect edges itself.
-
-**All business logic lives in the API** — active hours, break state, notification decisions, cooldowns. The one deliberate exception is signal conditioning (smoothing/hysteresis), which is device physics and per-machine calibration, not a rule, and runs at a 5s cadence.
-
-**Pause is website-only on purpose.** The friction is the feature. Do not add a menu-bar pause shortcut.
+- **The tray app logs every reading; the CLI only does with `PERIMETER_DEBUG=1`.** A tray app launched from a terminal is being watched; the CLI is what long runs pipe to a file.
+- **Capture tuning runs with `2>&1 | tee run.log`.** Failed readings go to stderr, and without it they vanish from the file.
+- **Waking from sleep calls `monitor.reset()`.** Otherwise samples from before sleep would still be voting in the window.
+- **The tray images are generated** by `scripts/make-tray-icons.mjs`. Edit the script, not the PNGs. `Template` in the filename makes macOS treat the alpha as a mask; `@2x` is Retina.
+- **`main.ts` is bundled with esbuild, not `tsc`** (tsc would leave extensionless imports unresolvable). It uses esbuild's JS API because pnpm's shim for `bin/esbuild` breaks after esbuild's postinstall.
+- **A terminal inside VS Code or Claude Code inherits `ELECTRON_RUN_AS_NODE=1`,** which turns Electron into plain Node. `pnpm start` clears it.
+- **API address:** `PERIMETER_API_URL`, default `http://localhost:3000`. A failed send is logged and dropped — retry is required before the API is hosted (`ARCHITECTURE.md`, *Core data flow*).
 
 ## Conventions
 
-- **Comments explain why, not what.** Don't narrate what the code does or restate an identifier in a doc comment — a reader has the code. Write one only for something the code can't show: where a tuned number came from, an approach that was tried and rejected, an empirical fact like the −69 spike. When one is warranted, keep it to a line or two.
-- **pnpm, not npm.** pnpm ignores the `workspaces` field in `package.json` and reads `pnpm-workspace.yaml`.
-- **pnpm 10 blocks postinstall scripts** unless the package is in `onlyBuiltDependencies`. Electron's postinstall is what downloads the actual binary, so without it the install reports success and `electron .` fails.
-- `tsconfig.base.json` holds only genuinely shared options. `target`/`lib`/`module`/`moduleResolution` belong in each app's own tsconfig — they legitimately differ (Electron main is Node, website is DOM).
-- `noUncheckedIndexedAccess` is on deliberately. The sliding-window filter indexes into a partially-filled array; this flag is what forces the startup case to be handled.
-- `moduleResolution: "Bundler"` in menu-bar, chosen over `NodeNext` to avoid `.js` extensions on relative imports.
+- **Comments explain why, not what.** Write one only for something the code can't show: where a tuned number came from, an approach that was tried and rejected, an empirical fact like the −69 spike. Keep it to a line or two.
+- **pnpm, not npm.** pnpm reads `pnpm-workspace.yaml`, not the `workspaces` field.
+- **pnpm 10 blocks postinstall scripts** unless the package is in `onlyBuiltDependencies`. Electron's postinstall downloads the binary; without it the install "succeeds" and `electron .` fails.
+- `tsconfig.base.json` holds only genuinely shared options; `target`/`lib`/`module`/`moduleResolution` belong in each app's tsconfig.
+- `noUncheckedIndexedAccess` is on deliberately — it forces the filter's partially-filled window to be handled.
+- `moduleResolution: "Bundler"` in menu-bar, to avoid `.js` extensions on relative imports.
+- **Schema changes go through `pnpm --filter @perimeter/api db:generate`, then `db:migrate`.** Never edit an applied migration.
 
 ## Not yet, on purpose
 
-- **The `present` nudge fires on every arrival, session or not, and repeats every 30s until the next
-  transition** (tray only). A deliberate stand-in: without the API there's no notion of a session,
-  active hours or breaks, so for now quitting the app is the pause. When the API lands, its `{ notify }` decides
-  instead — don't add session logic to the menu bar to make the stand-in smarter.
-- **The heartbeat records gaps, but nothing else acts on it yet.** The app posts transitions to
-  `POST /presence-events` and its current state to `POST /heartbeat` every 60s (`src/api.ts`, address
-  from `PERIMETER_API_URL`, default `http://localhost:3000`). Still to build on it: catching up a
-  transition the heartbeat shows was dropped, and the real `{ notify }` rules. It answers
-  `{ notify: false }` until then — correct, not a stub: without schedule or session tables no session
-  is ever active — and the app ignores it; the seam is the `TODO` in `onEvent` in `main.ts`.
-- **A transition that fails to send is dropped, not retried.** Fine while the API runs on the same Mac:
-  the heartbeat will restate the current state within a minute, so a lost event costs only its exact
-  time. Not fine once the API is hosted and other users' focus time is counted from these events —
-  retry must exist before then. It needs a queue persisted to disk (an in-memory one dies with the
-  app), sends in order, an id per event so the API can drop a duplicate (a save whose response got
-  lost gets resent), and a cap on the queue's size.
-- **No `packages/shared-types`.** Create it when a type would otherwise be copy-pasted into a second app, not before. When created, decide the consumption model: no-build `"types": "./src/index.ts"` works for Vite and bundlers but breaks a plain `tsc` build of the API.
-- **Crediting an honest `cold_start` is not built; the walk-back test (2026-10-17) supports it.** The
-  idea mirrors the dropout rule: hold the unknown time as pending and settle it on the phone's *first*
-  reading after the silence. Carried back from out of range, that reading came back weak twice (−79
-  then −74, −72 then −60, before −40 at the desk — about 10s of weak readings at a normal walk). Bluetooth
-  switched off and on at the desk came back at −50 on its first reading. The thresholds already split
-  them: below `awayBelow` credits, above `presentAbove` doesn't, the dead zone doesn't either. The
-  first reading after the gap was fresh (−50, not the −39 echoed before the dropout), so it can be
-  trusted. Three trials, not proven — repeat each a few times, including a brisk walk, before relying
-  on it. The menu bar must report that first reading, since the filter's median at commit hides it.
-  Same rule could settle a `dropout` from `present` and remove its known false positive (a phone that
-  left before `away` committed comes back weak). Uncaught: Bluetooth turned on while still far away,
-  then carried back — deliberate and multi-step, the bar the dropout rule already accepts. Preferred
-  over an "it's in the other room" button, which is honor-based.
-- **A phone heard only weakly, then lost, draws the "is Bluetooth off?" nudge.** Seen in the walk-back
-  test: launched with the phone at −85, five readings filled the window but went silent one poll short
-  of committing `away`, so `seen` made it a `dropout`. The phone was genuinely far. The first-reading
-  rule above would settle it; until then it's a known false positive alongside the fast-exit one.
-- **Phase 2 (website blocking via `/etc/hosts`) is not started.** Don't build toward it yet.
+- **The `present` nudge fires on every arrival and repeats every 30s** (tray only). It's a stand-in until the API's `{ notify }` decides. Don't add session logic to the menu bar to make it smarter.
+- **No `packages/shared-types`.** Create it when a type would otherwise be copy-pasted into a second app. Decide the consumption model then (see `ARCHITECTURE.md`, *Repo structure*).
+- **Phase 2 (website blocking via `/etc/hosts`) is not started.** Don't build toward it.
 
 ## Working style
 

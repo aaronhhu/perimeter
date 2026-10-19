@@ -13,7 +13,7 @@ A Bluetooth-based focus/accountability app. The core mechanic: your iPhone's pro
 
 ## The presence signal
 
-This is the part that determines whether the product works at all, so it's documented in detail.
+This is the part that determines whether the product works at all, so it's documented in detail. The measurements behind it, with dates, are in `docs/findings.md`.
 
 ### What doesn't work
 
@@ -169,7 +169,7 @@ That echo was originally recorded as "about three polls". A later run at a 5s in
 
 What the test did surface is a different problem. `rssi-absent` is the end state for *both* Bluetooth-off and genuinely-out-of-range, so the sampler cannot tell a session being gamed from one being honoured. That ambiguity is resolved a layer up rather than in the sampler — see *When there's no number at all*, where it is the entire reason for the last-verified-state rule.
 
-**Invocation cost — measured, and ~20× cheaper than first recorded.** This document previously put `system_profiler` at 1–2 seconds per invocation. Measured on the development Mac across several runs, it is **50–75ms**, so it is not the heavyweight call it was assumed to be, and cost is no longer a reason to avoid tightening the poll interval. The constraint that remains is tuning, not cost: the window and debounce were validated against 15s spacing, so changing the interval means re-validating both. The interval is currently 5s on trial — see *Signal conditioning* in CLAUDE.md for what that run settled and what it left open.
+**Invocation cost — measured, and ~20× cheaper than first recorded.** This document previously put `system_profiler` at 1–2 seconds per invocation. Measured on the development Mac across several runs, it is **50–75ms**, so it is not the heavyweight call it was assumed to be, and cost is no longer a reason to avoid tightening the poll interval. The constraint that remains is tuning, not cost: the window and debounce were validated against 15s spacing, so changing the interval means re-validating both. The interval is currently 5s on trial — see the 2026-09-29 entry in `docs/findings.md` for what that run settled and what it left open.
 
 **Still open: behaviour beyond 35 minutes.** Real use is hours, not half an hour. Nothing observed so far suggests a problem, but multi-hour idle behaviour is simply unmeasured.
 
@@ -196,12 +196,14 @@ perimeter/
 ## Core data flow (Phase 1)
 
 1. **iPhone → menu-bar app** — BLE advertisements, RSSI sampled locally via `system_profiler`.
-2. **menu-bar conditions the signal** — median smoothing, hysteresis, debounce — and derives a presence state. A poll that yields no reading is skipped rather than smoothed, and a sustained run of them reads as away.
+2. **menu-bar conditions the signal** — median smoothing, hysteresis, debounce — and derives a presence state. A poll that yields no reading is skipped rather than smoothed, and a sustained run of them keeps the last verified state.
 3. **menu-bar → api** — a `POST` on every state transition, sent immediately, **plus a heartbeat of the current state every 60s**. Never raw RSSI. (Both are wired: `POST /presence-events` and `POST /heartbeat`. The heartbeat's `{ notify }` is always false until session rules exist.)
 4. **api evaluates rules** — is a session active (schedule, manual session, break)? is the phone present? has the nudge interval passed? — and returns a decision (e.g. `{ notify: true }`) in the same response.
 5. **menu-bar → user** — if told to, fires a native macOS notification.
 6. **api ↔ website** — config reads/writes, leaderboard data. (Wired so far: `GET /timeline?date=`, one day of events in the user's timezone, read by the website through a Vite dev proxy at `/api`.)
 7. **menu-bar → website** — a "Settings" item opens the site (`shell.openExternal`), ideally with a short-lived token in the URL so the user doesn't have to log in again.
+
+**Delivery is fire-and-forget for now.** A transition that fails to send is logged and dropped. That's fine while the API runs on the same Mac, but not once it's hosted and other users' focus time is counted from these events. Retry has to exist before then. It needs a queue persisted to disk (an in-memory one dies with the app), sends in order, an id per event so the API can drop a duplicate (a save whose response got lost gets resent), and a cap on the queue's size. The heartbeat restating the current state is meant to bound the damage meanwhile, but catching up a dropped transition from a heartbeat isn't built yet. Until it is, a transition lost in an outage shorter than a gap stays lost until the phone next moves.
 
 Edge detection happens as part of debouncing in step 2, so the API receives transitions by construction rather than having to detect them. The heartbeat exists because some nudges happen when *nothing changes* — the phone was already on the desk when the session started, or it just stays there. Notification timing stays in the API, where it belongs — it's a rule, not physics.
 
@@ -235,8 +237,10 @@ There is **no stored `sessions` table** for scheduled sessions: focus time is co
 
 - A dropout keeps the last verified state — see *When there's no number at all* above.
 - Mac Bluetooth off → `unknown`, plus a local nudge to turn it back on.
-- A heartbeat gap longer than ~2 minutes (Mac asleep, app not running) is recorded as `unknown` starting at the previous `last_seen_at`.
+- **Heartbeat gaps.** Any contact from the Mac, heartbeat or event, goes through `recordContact` (`apps/api/src/contact.ts`). More than 150s since the last contact is a gap, recorded as `unknown` / `heartbeat_gap` at the old `last_seen_at`: one missed 60s beat is forgiven, two are not. A Mac asleep, an app not running and an API that was down all look the same from the server, and none of them can vouch for the phone, so all three cost credit. The user row is locked (`FOR UPDATE`) so a heartbeat and an event arriving together can't record the same gap twice.
+- **Resuming after a gap.** A heartbeat that ends a gap writes its presence back as `heartbeat_resume`. The app only sends changes, and a Mac waking with the phone where it left it changes nothing, so without this the timeline would read `unknown` until the phone next moved. This doesn't apply after a relaunch: the app's presence is null until its first verdict, which arrives as a normal event. Known cost: the resumed state is the app's unverified pre-sleep belief, so if the phone moved during sleep, up to ~30s is misattributed before the filter's first verdict corrects it. Both `heartbeat_*` causes are API-only, and `POST /presence-events` rejects them.
 - **Unknown time never counts as focus.**
+- **Planned: settling unknown time on the first reading after the silence.** A phone carried back from out of range reappears weak and climbs; one that sat on the desk with Bluetooth off reappears strong. Hold the unknown time as pending and settle it when the phone reappears: a first reading below `awayBelow` credits it, one above `presentAbove` (or in the dead zone) doesn't. The 2026-10-17 walk-back test supports this (see `docs/findings.md`), but with only three trials. The menu bar would have to report that first raw reading, since the filter's median at commit hides it. The same rule would settle a `dropout` from `present`, which removes two known false positives: a fast departure that goes silent before `away` commits (see *Still open: fast departures*), and a phone heard only weakly at launch and then lost. What it can't catch: Bluetooth turned back on while still far away, then carried in. That's deliberate and multi-step, the same bar the dropout rule accepts. It's preferred over an "it's in the other room" button, which is honor-based.
 
 ### Notifications
 
