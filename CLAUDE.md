@@ -56,6 +56,7 @@ The signal is the iPhone's RSSI from `system_profiler SPBluetoothDataType`, read
 - **The tray images are generated** by `scripts/make-tray-icons.mjs`. Edit the script, not the PNGs. `Template` in the filename makes macOS treat the alpha as a mask; `@2x` is Retina.
 - **`main.ts` is bundled with esbuild, not `tsc`** (tsc would leave extensionless imports unresolvable). It uses esbuild's JS API because pnpm's shim for `bin/esbuild` breaks after esbuild's postinstall.
 - **A terminal inside VS Code or Claude Code inherits `ELECTRON_RUN_AS_NODE=1`,** which turns Electron into plain Node. `pnpm start` clears it.
+- **The iPhone address is required, from `apps/menu-bar/.env`** (gitignored; `.env.example` has a placeholder). No default: a wrong address doesn't fail, it reads as `device-absent` forever. Never commit a real address.
 - **API address:** `PERIMETER_API_URL`, default `http://localhost:3000`. A failed send is logged and dropped — retry is required before the API is hosted (`ARCHITECTURE.md`, *Core data flow*).
 
 ## Conventions

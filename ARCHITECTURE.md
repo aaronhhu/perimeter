@@ -73,7 +73,7 @@ Two things fall out of this:
 { "SPBluetoothDataType": [ {
     "controller_properties": { "controller_state": "attrib_on" },
     "device_not_connected": [
-      { "aarons iphone": { "device_address": "5C:50:D9:CF:E6:F4", "device_rssi": "-42" } }
+      { "aarons iphone": { "device_address": "AA:BB:CC:DD:EE:01", "device_rssi": "-42" } }
     ] } ] }
 ```
 

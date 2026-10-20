@@ -1,5 +1,5 @@
 import { INITIAL_STATE, step, DEFAULT_CONFIG, type FilterConfig, type FilterState, type Presence } from "./filter";
-import { readRssi, DEFAULT_DEVICE, type DeviceMatcher, type Reading } from "./sampler";
+import { readRssi, type DeviceMatcher, type Reading } from "./sampler";
 
 export interface MonitorConfig {
   readonly pollIntervalMs: number;
@@ -113,10 +113,12 @@ export interface MonitorHandle {
   reset(): void;
 }
 
-export interface MonitorOptions {
+/** Tests pass `read` instead of a device, so they never shell out. */
+export type MonitorOptions = MonitorCallbacks &
+  ({ readonly device: DeviceMatcher } | { readonly read: () => Promise<Reading> });
+
+interface MonitorCallbacks {
   readonly config?: MonitorConfig;
-  readonly device?: DeviceMatcher;
-  readonly read?: () => Promise<Reading>;
   readonly onEvent: (event: PresenceEvent) => void;
   /** Every poll, event or not. */
   readonly onReading?: (reading: Reading, state: MonitorState) => void;
@@ -130,8 +132,7 @@ export interface MonitorOptions {
  */
 export function startMonitor(options: MonitorOptions): MonitorHandle {
   const config = options.config ?? DEFAULT_MONITOR_CONFIG;
-  const device = options.device ?? DEFAULT_DEVICE;
-  const read = options.read ?? (() => readRssi(device));
+  const read = "read" in options ? options.read : () => readRssi(options.device);
 
   let state = INITIAL_MONITOR_STATE;
   let stopped = false;

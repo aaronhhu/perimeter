@@ -21,7 +21,7 @@ const REAL_OUTPUT = String.raw`{
       "device_not_connected": [
         {
           "Aar Pods": {
-            "device_address": "74:65:0C:8A:C4:6E",
+            "device_address": "AA:BB:CC:DD:EE:02",
             "device_caseVersion": "1.9.4",
             "device_firmwareVersion": "6A321",
             "device_minorType": "Headphones",
@@ -31,7 +31,7 @@ const REAL_OUTPUT = String.raw`{
         },
         {
           "aarons iphone": {
-            "device_address": "5C:50:D9:CF:E6:F4",
+            "device_address": "AA:BB:CC:DD:EE:01",
             "device_firmwareVersion": "26.6.0",
             "device_minorType": "Mobile Phone",
             "device_productID": "0x7507",
@@ -44,8 +44,8 @@ const REAL_OUTPUT = String.raw`{
   ]
 }`;
 
-const IPHONE: DeviceMatcher = { address: "5C:50:D9:CF:E6:F4" };
-const HEADPHONES: DeviceMatcher = { address: "74:65:0C:8A:C4:6E" };
+const IPHONE: DeviceMatcher = { address: "AA:BB:CC:DD:EE:01" };
+const HEADPHONES: DeviceMatcher = { address: "AA:BB:CC:DD:EE:02" };
 
 interface DeviceProperties {
   device_address: string;
@@ -95,8 +95,8 @@ describe("parseRssi", () => {
   });
 
   it("matches the address regardless of case and separators", () => {
-    expect(parseRssi(REAL_OUTPUT, { address: "5c50d9cfe6f4" })).toEqual({ ok: true, rssi: -37 });
-    expect(parseRssi(REAL_OUTPUT, { address: "5c-50-d9-cf-e6-f4" })).toEqual({ ok: true, rssi: -37 });
+    expect(parseRssi(REAL_OUTPUT, { address: "aabbccddee01" })).toEqual({ ok: true, rssi: -37 });
+    expect(parseRssi(REAL_OUTPUT, { address: "aa-bb-cc-dd-ee-01" })).toEqual({ ok: true, rssi: -37 });
   });
 
   it("accepts a numeric device_rssi, in case a future macOS stops quoting it", () => {

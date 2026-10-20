@@ -20,9 +20,6 @@ export type Reading =
   | { readonly ok: true; readonly rssi: number }
   | { readonly ok: false; readonly reason: DropoutReason; readonly detail: string };
 
-/** Machine-specific, like the filter thresholds. `blueutil --paired` lists addresses. */
-export const DEFAULT_DEVICE: DeviceMatcher = { address: "5C:50:D9:CF:E6:F4" };
-
 const COMMAND = "system_profiler";
 const ARGS = ["SPBluetoothDataType", "-json"];
 

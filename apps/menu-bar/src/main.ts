@@ -1,4 +1,4 @@
-import { app, Menu, Notification, Tray, nativeImage, powerMonitor, shell } from "electron";
+import { app, dialog, Menu, Notification, Tray, nativeImage, powerMonitor, shell } from "electron";
 import { join } from "node:path";
 import {
   DEFAULT_MONITOR_CONFIG,
@@ -8,12 +8,16 @@ import {
   type PresenceEvent,
   type ReportedPresence,
 } from "./monitor";
-import { DEFAULT_DEVICE } from "./sampler";
+import type { DeviceMatcher } from "./sampler";
+import { deviceFromEnv, loadEnvFile, MISSING_DEVICE } from "./env";
 import { sendPresenceEvent, startHeartbeat } from "./api";
 import { nudgeFor, STARTING, iconName, tooltip, viewOf, type StatusView } from "./presentation";
 import { trayMenu } from "./tray";
 
-const device = { address: process.env["PERIMETER_IPHONE_ADDRESS"] ?? DEFAULT_DEVICE.address };
+// From the app's folder, not the cwd: a login-item launch doesn't start in apps/menu-bar.
+loadEnvFile(join(app.getAppPath(), ".env"));
+
+const device = deviceFromEnv();
 
 // TODO: the architecture wants a short-lived token on this URL so opening settings doesn't mean
 // logging in again. Nothing to sign with yet — apps/api has no auth.
@@ -56,14 +60,18 @@ const BLUETOOTH_SETTINGS = "x-apple.systempreferences:com.apple.BluetoothSetting
  * Two copies polling the same device would halve the spacing the window and debounce are tuned
  * against, so the second instance exits rather than joining in.
  */
-if (!app.requestSingleInstanceLock()) {
+if (device === null) {
+  // A tray app launched at login has no terminal, so the reason has to be a dialog.
+  dialog.showErrorBox("Perimeter can't start", MISSING_DEVICE);
+  app.exit(1);
+} else if (!app.requestSingleInstanceLock()) {
   console.log("Perimeter is already running — check the menu bar.");
   app.quit();
 } else {
-  void app.whenReady().then(start);
+  void app.whenReady().then(() => start(device));
 }
 
-function start(): void {
+function start(device: DeviceMatcher): void {
   // Tray-only: no window is ever created, so a Dock icon would be a dead target.
   app.dock?.hide();
 

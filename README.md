@@ -33,7 +33,7 @@ The app only works if your Mac can already "see" your iPhone over Bluetooth. Bef
    system_profiler SPBluetoothDataType
    ```
 
-   Find your iPhone in the output. It should have an **Address** line (something like `5C:50:D9:CF:E6:F4`) and an **RSSI** line (a negative number like `-45`). If you see the RSSI, you're set. Write down the address; you'll need it below.
+   Find your iPhone in the output. It should have an **Address** line (something like `AA:BB:CC:DD:EE:FF`) and an **RSSI** line (a negative number like `-45`). If you see the RSSI, you're set. Write down the address; you'll need it below.
 
 **Don't worry if the iPhone says "Not Connected" or "Connection Unsuccessful."** That's normal. iPhones refuse a full Bluetooth connection to a Mac, but the app doesn't need one. It only reads the signal strength the phone broadcasts.
 
@@ -98,10 +98,22 @@ Open http://localhost:5173.
 
 ### 5. Start the menu bar app
 
-In a new terminal, using the iPhone address from the Bluetooth check above:
+Tell it which phone is yours. Copy the example settings file:
 
 ```sh
-PERIMETER_IPHONE_ADDRESS=XX:XX:XX:XX:XX:XX pnpm --filter @perimeter/menu-bar start
+cp apps/menu-bar/.env.example apps/menu-bar/.env
+```
+
+Edit `apps/menu-bar/.env` and replace the placeholder with the iPhone address from the Bluetooth check above:
+
+```
+PERIMETER_IPHONE_ADDRESS=AA:BB:CC:DD:EE:FF
+```
+
+`.env` is gitignored, so your address stays on your machine. The app won't start without it, and it tells you why. Then, in a new terminal:
+
+```sh
+pnpm --filter @perimeter/menu-bar start
 ```
 
 An icon appears in the macOS menu bar. Allow notifications when macOS asks.
@@ -110,9 +122,11 @@ After launch it takes about 30 seconds to decide whether the phone is present or
 
 ## Configuration
 
+Menu bar settings go in `apps/menu-bar/.env`. API settings go in `apps/api/.env`. A variable set in the shell works too.
+
 | Variable | Used by | Default | What it's for |
 |---|---|---|---|
-| `PERIMETER_IPHONE_ADDRESS` | menu bar | the developer's phone | Your iPhone's Bluetooth address. **Set this**, or the app won't find your phone. |
+| `PERIMETER_IPHONE_ADDRESS` | menu bar | (none, required) | Your iPhone's Bluetooth address |
 | `PERIMETER_API_URL` | menu bar | `http://localhost:3000` | Where to send presence updates |
 | `PERIMETER_WEBSITE_URL` | menu bar | `http://localhost:5173` | What the tray's website item opens |
 | `PERIMETER_DEBUG` | menu bar CLI | off | Set to `1` to print every reading |
@@ -127,7 +141,7 @@ The thresholds for "present" and "away" are tuned for one room, one Mac, and one
 
 ```sh
 # Run the signal reader in the terminal, with no menu bar icon
-PERIMETER_DEBUG=1 PERIMETER_IPHONE_ADDRESS=XX:XX:XX:XX:XX:XX pnpm --filter @perimeter/menu-bar dev
+PERIMETER_DEBUG=1 pnpm --filter @perimeter/menu-bar dev
 
 # Tests and type checks
 pnpm --filter @perimeter/menu-bar test
@@ -139,6 +153,7 @@ pnpm -r typecheck
 
 - **Menu bar app opens as plain Node or nothing appears:** terminals inside VS Code and Claude Code set `ELECTRON_RUN_AS_NODE=1`. `pnpm start` clears it, so launch through `pnpm start` rather than calling `electron` directly.
 - **No notifications:** `pnpm install` re-signs the Electron binary so macOS will allow its notifications. If you skipped the install scripts, run `pnpm install` again.
+- **"PERIMETER_IPHONE_ADDRESS is missing":** `apps/menu-bar/.env` doesn't exist, or the address in it isn't six pairs of letters/digits like `AA:BB:CC:DD:EE:FF`. See step 5.
 - **Phone never detected (`device-absent`):** the address is wrong, or the pairing is gone. Re-check `system_profiler SPBluetoothDataType` and make sure the iPhone is still listed under *My Devices*.
 - **State stuck on unknown:** Bluetooth is probably off on the phone, or it's in a dead spot. Turn Bluetooth on and bring the phone close to the Mac for a moment.
 

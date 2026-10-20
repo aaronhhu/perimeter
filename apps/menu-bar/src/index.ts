@@ -6,9 +6,17 @@ import {
   type PresenceEvent,
   type ReportedPresence,
 } from "./monitor";
-import { DEFAULT_DEVICE, type Reading } from "./sampler";
+import { fileURLToPath } from "node:url";
+import { deviceFromEnv, loadEnvFile, MISSING_DEVICE } from "./env";
+import type { Reading } from "./sampler";
 
-const device = { address: process.env["PERIMETER_IPHONE_ADDRESS"] ?? DEFAULT_DEVICE.address };
+loadEnvFile(fileURLToPath(new URL("../.env", import.meta.url)));
+
+const device = deviceFromEnv();
+if (device === null) {
+  console.error(MISSING_DEVICE);
+  process.exit(1);
+}
 const debug = process.env["PERIMETER_DEBUG"] === "1";
 const apiUrl = process.env["PERIMETER_API_URL"] ?? "http://localhost:3000";
 
