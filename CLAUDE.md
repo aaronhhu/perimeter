@@ -6,6 +6,7 @@ This file is the short list of things that are easy to get wrong. The rest lives
 
 - **`ARCHITECTURE.md`** — how it works and why it was designed that way.
 - **`docs/findings.md`** — dated test results and measurements, the evidence behind the rules here.
+- **`docs/distribution.md`** — what users can see once it's packaged, and per-user settings (the iPhone address) for downloaded copies.
 
 **Where new things go:** a test result goes in `docs/findings.md`, with its date and numbers. If it changes how code should be written, add the *rule* here in a line or two and point to the finding. Design goes in `ARCHITECTURE.md`. Don't record build progress here — it goes stale, and a stale line here gets trusted.
 

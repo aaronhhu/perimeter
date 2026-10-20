@@ -212,7 +212,7 @@ Edge detection happens as part of debouncing in step 2, so the API receives tran
 - **Business logic lives in the API, not the Electron app.** Active-hours and break-state checks can change (user edits schedule, starts a break) and need one source of truth. The menu bar app is a sensor + renderer. The one exception is signal conditioning, for the reasons given above.
 - **Breaks are website-only, on purpose.** The friction is the feature — an easy pause defeats the point. A menu-bar shortcut to `POST /breaks` could be added later without any backend change; deliberately not doing it yet.
 - **Docker is for local Postgres only** (`docker-compose`), not for the menu bar app or website. Production Postgres should be a managed service (Neon/Supabase/Render), not self-hosted.
-- **Hosting:** API on Render/Railway/Fly.io, website on Vercel, menu bar app packaged with `electron-builder` into a `.dmg` and distributed directly — no App Store, no notarization needed for Phase 1.
+- **Hosting:** API on Render/Railway/Fly.io, website on Vercel, menu bar app packaged with `electron-builder` into a `.dmg` and distributed directly — no App Store, no notarization needed for Phase 1. What that exposes, and why the iPhone address can't come from `.env` once packaged: `docs/distribution.md`.
 
 ## Sessions, focus and notifications
 
