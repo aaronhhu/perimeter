@@ -225,9 +225,15 @@ Decided 2026-09-18; not built yet.
 ### When a session is active
 
 - **Schedule.** Users set their own hours as blocks per weekday. The backend supports several blocks per day from the start; the MVP website edits one per day, so adding more later is frontend-only. Blocks can't cross midnight, and overlapping blocks are rejected on save (they would double-count scheduled time).
-- **Manual sessions.** Can be started from the website at any time, including outside the schedule, for a chosen length. `ends_at = started_at + length`, and it may run past midnight. Ending never requires an action, so forgetting a session is harmless.
-- **Breaks** (website only). Either 15 minutes, or the rest of the day (ends at local midnight). A rest-of-day break also ends any running manual session. Starting a session during a break ends the break (`ended_at`).
-- **The rule:** the latest user action wins; the schedule is the default when nothing overrides it.
+- **Manual sessions.** Started from the website for a chosen length, and can be ended early. `ends_at = started_at + length`, and it may run past midnight. Ending never requires an action, so forgetting a session is harmless. Only one runs at a time. **A manual session can't be started inside scheduled hours** unless the day is paused (below), because it would only duplicate the schedule. One started outside them may run into a scheduled block; both are "on", so nothing conflicts.
+- **Breaks** (website only), and either kind can be ended early. Returning sooner shouldn't be punished.
+  - **Short** (15 minutes): pauses whatever is running, schedule or manual. Only available while a session is on. It doesn't extend a manual session's `ends_at`.
+  - **Rest of the day** (ends at local midnight): pauses the *schedule* only. It can be taken before the day's hours start (a day off), and it ends any manual session running when it starts. A manual session started *after* it runs normally, and when that session ends the schedule stays paused. That's why starting a session doesn't end a rest-of-day break. Ending the break early brings the schedule back.
+- **The rule (decided 2026-11-02):** a session is on at instant *t* when there's no short break at *t*, and either
+  - a schedule block covers *t* and no rest-of-day break covers it, or
+  - a manual session covers *t*.
+
+  This replaces the earlier "latest user action wins", which couldn't express a manual session running on a paused day.
 
 Everything is stored as **time ranges, not a status flag**. Nothing has to run at 9:00 or at the end of a break to flip state, so there are no cron jobs, and whether a session is active at any instant is a pure function of the rows. The same rows answer "how much focus today" for the leaderboard. Timestamps are stored in UTC; the user's timezone lives on the user row and is applied for the schedule and "midnight".
 
