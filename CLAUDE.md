@@ -46,6 +46,7 @@ The signal is the iPhone's RSSI from `system_profiler SPBluetoothDataType`, read
 - **Request validation derives its enums from the Drizzle `pgEnum`s.** Never retype the values.
 - **Pause is website-only on purpose.** The friction is the feature. Don't add a menu-bar pause shortcut.
 - **Until auth exists, every route uses `CURRENT_USER_ID`** (`apps/api/src/currentUser.ts`).
+- **Routes get integration tests in `apps/api/src/test/`**, through `startHarness()`: PGlite with the real migrations, reached by the real `pg` driver, so no Docker. It's one Postgres session, so it can't test concurrency or row locks. `app.ts` builds the app; only `index.ts` listens.
 
 ## The menu bar shell
 
