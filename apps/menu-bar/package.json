@@ -11,7 +11,7 @@
     "bundle": "node scripts/bundle.mjs",
     "icons": "node scripts/make-tray-icons.mjs",
     "postinstall": "node scripts/sign-electron.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p picker",
     "test": "vitest run"
   },
   "devDependencies": {

@@ -26,18 +26,19 @@ const ARGS = ["SPBluetoothDataType", "-json"];
 /** Measured at 50–75ms per invocation; this is a hang guard, not a budget. */
 const DEFAULT_TIMEOUT_MS = 5_000;
 
+/** The raw JSON. Shared with the device picker, so both read the same report the same way. */
+export async function bluetoothReport(timeoutMs: number = DEFAULT_TIMEOUT_MS): Promise<string> {
+  const { stdout } = await run(COMMAND, ARGS, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, encoding: "utf8" });
+  return stdout;
+}
+
 /** Never rejects: a dropout is a value the caller reasons about, and the poll loop must not die on it. */
 export async function readRssi(
   device: DeviceMatcher,
   options: { readonly timeoutMs?: number } = {},
 ): Promise<Reading> {
   try {
-    const { stdout } = await run(COMMAND, ARGS, {
-      timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      maxBuffer: 4 * 1024 * 1024,
-      encoding: "utf8",
-    });
-    return parseRssi(stdout, device);
+    return parseRssi(await bluetoothReport(options.timeoutMs), device);
   } catch (error) {
     return { ok: false, reason: "command-failed", detail: errorMessage(error) };
   }
@@ -69,15 +70,8 @@ export function parseRssi(stdout: string, device: DeviceMatcher): Reading {
 
   // Bluetooth being off also empties the device buckets, so check it first or the reason comes back
   // as the much less useful "device-absent".
-  for (const controller of controllers) {
-    if (!isRecord(controller)) continue;
-    const properties = controller["controller_properties"];
-    if (!isRecord(properties)) continue;
-    const state = properties["controller_state"];
-    if (typeof state === "string" && state !== "attrib_on") {
-      return { ok: false, reason: "bluetooth-off", detail: `controller_state: ${state}` };
-    }
-  }
+  const off = bluetoothOffState(controllers);
+  if (off !== null) return { ok: false, reason: "bluetooth-off", detail: `controller_state: ${off}` };
 
   for (const controller of controllers) {
     if (!isRecord(controller)) continue;
@@ -113,14 +107,26 @@ function rssiOf(properties: Record<string, unknown>, name: string, bucket: strin
   return { ok: true, rssi };
 }
 
-function normalizeAddress(address: string): string {
+/** The controller's state when it isn't on, otherwise null. Off also empties the device buckets. */
+export function bluetoothOffState(controllers: readonly unknown[]): string | null {
+  for (const controller of controllers) {
+    if (!isRecord(controller)) continue;
+    const properties = controller["controller_properties"];
+    if (!isRecord(properties)) continue;
+    const state = properties["controller_state"];
+    if (typeof state === "string" && state !== "attrib_on") return state;
+  }
+  return null;
+}
+
+export function normalizeAddress(address: string): string {
   return address.replace(/[^0-9a-f]/gi, "").toLowerCase();
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

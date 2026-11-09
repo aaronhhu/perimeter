@@ -11,17 +11,37 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-await build({
-  entryPoints: [join(root, "src", "main.ts")],
-  outfile: join(root, "dist", "main.cjs"),
-  bundle: true,
-  platform: "node",
-  // CJS, even though the package is ESM: Electron's ESM loader has enough caveats that the bundle
-  // avoiding it entirely is one less thing between a change and seeing it run.
-  format: "cjs",
-  target: "node22",
-  // Provided by the runtime, and not resolvable as a normal module.
-  external: ["electron"],
-  sourcemap: true,
-  logLevel: "info",
-});
+const shared = { bundle: true, sourcemap: true, logLevel: "info" };
+
+await Promise.all([
+  build({
+    ...shared,
+    entryPoints: [join(root, "src", "main.ts")],
+    outfile: join(root, "dist", "main.cjs"),
+    platform: "node",
+    // CJS, even though the package is ESM: Electron's ESM loader has enough caveats that the bundle
+    // avoiding it entirely is one less thing between a change and seeing it run.
+    format: "cjs",
+    target: "node22",
+    // Provided by the runtime, and not resolvable as a normal module.
+    external: ["electron"],
+  }),
+  // A sandboxed preload can require only `electron`, so it's bundled down to that one import.
+  build({
+    ...shared,
+    entryPoints: [join(root, "src", "pickerPreload.ts")],
+    outfile: join(root, "dist", "pickerPreload.cjs"),
+    platform: "node",
+    format: "cjs",
+    target: "node22",
+    external: ["electron"],
+  }),
+  build({
+    ...shared,
+    entryPoints: [join(root, "picker", "renderer.ts")],
+    outfile: join(root, "dist", "picker.js"),
+    platform: "browser",
+    format: "iife",
+    target: "chrome130",
+  }),
+]);

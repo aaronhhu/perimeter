@@ -1,0 +1,54 @@
+:root {
+  color-scheme: light dark;
+  font: 13px -apple-system, BlinkMacSystemFont, sans-serif;
+  --muted: #6e6e73;
+  --line: rgba(0, 0, 0, 0.1);
+  --row: rgba(0, 0, 0, 0.03);
+  --accent: #0a84ff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --muted: #98989d;
+    --line: rgba(255, 255, 255, 0.12);
+    --row: rgba(255, 255, 255, 0.04);
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 20px 16px;
+  gap: 12px;
+  user-select: none;
+}
+h1 { font-size: 17px; margin: 0 0 6px; }
+#intro { margin: 0; color: var(--muted); line-height: 1.45; }
+
+main { flex: 1; overflow-y: auto; }
+#status { margin: 0 0 8px; color: var(--muted); line-height: 1.45; }
+#status:empty { display: none; }
+#duplicates { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+
+#devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.device {
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--row);
+  color: inherit;
+  font: inherit;
+  cursor: default;
+}
+.device[aria-checked="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.device .name { font-weight: 600; display: block; margin-bottom: 3px; }
+.device .meta { color: var(--muted); font-size: 12px; }
+.device .live { color: #30a14e; }
+
+footer { display: flex; justify-content: space-between; gap: 8px; }
+footer div { display: flex; gap: 8px; }
+button { font: inherit; }

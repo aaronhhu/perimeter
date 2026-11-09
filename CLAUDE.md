@@ -57,7 +57,8 @@ The signal is the iPhone's RSSI from `system_profiler SPBluetoothDataType`, read
 - **The tray images are generated** by `scripts/make-tray-icons.mjs`. Edit the script, not the PNGs. `Template` in the filename makes macOS treat the alpha as a mask; `@2x` is Retina.
 - **`main.ts` is bundled with esbuild, not `tsc`** (tsc would leave extensionless imports unresolvable). It uses esbuild's JS API because pnpm's shim for `bin/esbuild` breaks after esbuild's postinstall.
 - **A terminal inside VS Code or Claude Code inherits `ELECTRON_RUN_AS_NODE=1`,** which turns Electron into plain Node. `pnpm start` clears it.
-- **The iPhone address is required, from `apps/menu-bar/.env`** (gitignored; `.env.example` has a placeholder). No default: a wrong address doesn't fail, it reads as `device-absent` forever. Never commit a real address.
+- **The iPhone address: `.env` wins, then the saved pick.** The tray app uses `PERIMETER_IPHONE_ADDRESS` from `apps/menu-bar/.env` if set (and disables **Change iPhone…**, which would silently do nothing), otherwise the phone picked in the picker window, saved to `userData/settings.json`. A malformed `.env` value is an error, never a fall-through. The CLI has no window, so for it `.env` stays required. No default anywhere: a wrong address doesn't fail, it reads as `device-absent` forever. Never commit a real address.
+- **The picker window is sandboxed** (no Node, `contextIsolation`), and reaches the main process only through `src/pickerPreload.ts`. Device names are set by whoever owns the device, so the page uses `textContent`, never HTML. Listing devices (`devices.ts`) and settings (`settings.ts`) import no Electron, same as the sampler. The renderer (`picker/renderer.ts`) has its own DOM-typed tsconfig.
 - **API address:** `PERIMETER_API_URL`, default `http://localhost:3000`. A failed send is logged and dropped — retry is required before the API is hosted (`ARCHITECTURE.md`, *Core data flow*).
 
 ## Conventions

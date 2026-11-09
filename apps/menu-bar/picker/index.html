@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Device names are set by whoever owns the device, so the page runs no inline script and loads nothing remote. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'" />
+    <title>Choose your iPhone</title>
+    <link rel="stylesheet" href="picker.css" />
+  </head>
+  <body>
+    <header>
+      <h1 id="title">Choose your iPhone</h1>
+      <p id="intro"></p>
+    </header>
+
+    <main>
+      <p id="status" role="status"></p>
+      <ul id="devices" role="radiogroup" aria-labelledby="title"></ul>
+      <p id="duplicates" hidden>
+        More than one device has this name. The one showing a signal is the phone that's near this Mac right now.
+      </p>
+    </main>
+
+    <footer>
+      <div class="secondary">
+        <button id="refresh" type="button">Refresh</button>
+        <button id="bluetooth" type="button">Bluetooth Settings…</button>
+      </div>
+      <div class="primary">
+        <button id="cancel" type="button">Cancel</button>
+        <button id="choose" type="button" class="default" disabled>Use This iPhone</button>
+      </div>
+    </footer>
+
+    <script src="../dist/picker.js"></script>
+  </body>
+</html>

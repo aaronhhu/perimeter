@@ -5,6 +5,7 @@ import { statusTitle, type StatusView } from "./presentation";
 
 export interface TrayActions {
   readonly openSettings: () => void;
+  readonly changeIphone: () => void;
   readonly setOpenAtLogin: (openAtLogin: boolean) => void;
   readonly quit: () => void;
 }
@@ -12,6 +13,8 @@ export interface TrayActions {
 export interface TrayModel {
   readonly view: StatusView;
   readonly openAtLogin: boolean;
+  /** `.env` wins over the saved choice, so picking another phone would silently do nothing. */
+  readonly iphoneFromEnv: boolean;
 }
 
 /**
@@ -23,6 +26,9 @@ export function trayMenu(model: TrayModel, actions: TrayActions): MenuItemConstr
     { label: statusTitle(model.view), enabled: false },
     { type: "separator" },
     { label: "Settings…", click: () => actions.openSettings() },
+    model.iphoneFromEnv
+      ? { label: "iPhone Set in .env", enabled: false }
+      : { label: "Change iPhone…", click: () => actions.changeIphone() },
     { type: "separator" },
     {
       label: "Open at Login",

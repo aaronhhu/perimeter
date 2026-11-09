@@ -15,8 +15,31 @@ export const MISSING_DEVICE =
 
 const ADDRESS = /^[0-9a-f]{2}([:-]?[0-9a-f]{2}){5}$/i;
 
-/** No fallback: someone else's address doesn't fail, it reads as device-absent forever. */
+export function isBluetoothAddress(value: string): boolean {
+  return ADDRESS.test(value.trim());
+}
+
+/**
+ * The tray app treats `.env` as a developer override of the address picked in the app, so it needs
+ * to tell "not set" (fall through to the saved choice) from "set but wrong" (say so, don't guess).
+ */
+export type EnvAddress =
+  | { readonly kind: "unset" }
+  | { readonly kind: "invalid"; readonly value: string }
+  | { readonly kind: "set"; readonly device: DeviceMatcher };
+
+export function addressFromEnv(): EnvAddress {
+  const value = process.env["PERIMETER_IPHONE_ADDRESS"]?.trim() ?? "";
+  if (value === "") return { kind: "unset" };
+  return ADDRESS.test(value) ? { kind: "set", device: { address: value } } : { kind: "invalid", value };
+}
+
+export const invalidEnvAddress = (value: string): string =>
+  `PERIMETER_IPHONE_ADDRESS in apps/menu-bar/.env is "${value}", which isn't a Bluetooth address. ` +
+  "Fix it, or delete the line to choose your iPhone from a list instead.";
+
+/** The CLI has no window to pick in, so for it `.env` stays required. No fallback: someone else's address doesn't fail, it reads as device-absent forever. */
 export function deviceFromEnv(): DeviceMatcher | null {
-  const address = process.env["PERIMETER_IPHONE_ADDRESS"]?.trim() ?? "";
-  return ADDRESS.test(address) ? { address } : null;
+  const env = addressFromEnv();
+  return env.kind === "set" ? env.device : null;
 }

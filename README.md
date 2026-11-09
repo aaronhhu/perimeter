@@ -33,7 +33,7 @@ The app only works if your Mac can already "see" your iPhone over Bluetooth. Bef
    system_profiler SPBluetoothDataType
    ```
 
-   Find your iPhone in the output. It should have an **Address** line (something like `AA:BB:CC:DD:EE:FF`) and an **RSSI** line (a negative number like `-45`). If you see the RSSI, you're set. Write down the address; you'll need it below.
+   Find your iPhone in the output. It should have an **Address** line (something like `AA:BB:CC:DD:EE:FF`) and an **RSSI** line (a negative number like `-45`). If you see the RSSI, you're set.
 
 **Don't worry if the iPhone says "Not Connected" or "Connection Unsuccessful."** That's normal. iPhones refuse a full Bluetooth connection to a Mac, but the app doesn't need one. It only reads the signal strength the phone broadcasts.
 
@@ -98,23 +98,13 @@ Open http://localhost:5173.
 
 ### 5. Start the menu bar app
 
-Tell it which phone is yours. Copy the example settings file:
-
-```sh
-cp apps/menu-bar/.env.example apps/menu-bar/.env
-```
-
-Edit `apps/menu-bar/.env` and replace the placeholder with the iPhone address from the Bluetooth check above:
-
-```
-PERIMETER_IPHONE_ADDRESS=AA:BB:CC:DD:EE:FF
-```
-
-`.env` is gitignored, so your address stays on your machine. The app won't start without it, and it tells you why. Then, in a new terminal:
+In a new terminal:
 
 ```sh
 pnpm --filter @perimeter/menu-bar start
 ```
+
+The first time, a window lists the devices paired with your Mac. Pick your iPhone. If two devices have the same name (an old phone and a new one, say), pick the one showing a signal. The choice is saved in `~/Library/Application Support/Perimeter/settings.json`, and **Change iPhone…** in the menu bar picks another one later.
 
 An icon appears in the macOS menu bar. Allow notifications when macOS asks.
 
@@ -126,7 +116,7 @@ Menu bar settings go in `apps/menu-bar/.env`. API settings go in `apps/api/.env`
 
 | Variable | Used by | Default | What it's for |
 |---|---|---|---|
-| `PERIMETER_IPHONE_ADDRESS` | menu bar | (none, required) | Your iPhone's Bluetooth address |
+| `PERIMETER_IPHONE_ADDRESS` | menu bar | (none) | Your iPhone's Bluetooth address. The tray app normally uses the phone picked in its window; setting this overrides that choice and disables **Change iPhone…**. Required for the CLI (`pnpm dev`), which has no window. |
 | `PERIMETER_API_URL` | menu bar | `http://localhost:3000` | Where to send presence updates |
 | `PERIMETER_WEBSITE_URL` | menu bar | `http://localhost:5173` | What the tray's website item opens |
 | `PERIMETER_DEBUG` | menu bar CLI | off | Set to `1` to print every reading |
@@ -153,8 +143,9 @@ pnpm -r typecheck
 
 - **Menu bar app opens as plain Node or nothing appears:** terminals inside VS Code and Claude Code set `ELECTRON_RUN_AS_NODE=1`. `pnpm start` clears it, so launch through `pnpm start` rather than calling `electron` directly.
 - **No notifications:** `pnpm install` re-signs the Electron binary so macOS will allow its notifications. If you skipped the install scripts, run `pnpm install` again.
-- **"PERIMETER_IPHONE_ADDRESS is missing":** `apps/menu-bar/.env` doesn't exist, or the address in it isn't six pairs of letters/digits like `AA:BB:CC:DD:EE:FF`. See step 5.
-- **Phone never detected (`device-absent`):** the address is wrong, or the pairing is gone. Re-check `system_profiler SPBluetoothDataType` and make sure the iPhone is still listed under *My Devices*.
+- **"PERIMETER_IPHONE_ADDRESS … isn't a Bluetooth address":** the address in `apps/menu-bar/.env` isn't six pairs of letters/digits like `AA:BB:CC:DD:EE:FF`. Fix it, or delete the line and pick the phone in the app instead.
+- **Your iPhone isn't in the picker:** it isn't paired with this Mac yet. Pair it (see the Bluetooth check above), then click **Refresh**.
+- **Phone never detected (`device-absent`):** the wrong device was picked, or the pairing is gone. Use **Change iPhone…**, and make sure the iPhone is still listed under *My Devices*.
 - **State stuck on unknown:** Bluetooth is probably off on the phone, or it's in a dead spot. Turn Bluetooth on and bring the phone close to the Mac for a moment.
 
 ## More detail

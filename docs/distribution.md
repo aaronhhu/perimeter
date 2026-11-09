@@ -59,6 +59,8 @@ problems:
 
 ### Plan
 
+Built (2026-11-09): settings in `userData`, the first-launch picker, **Change iPhone…** in the tray, and `.env` as an override. Not yet: the packaging exclusion below, because there's no electron-builder config yet.
+
 - **Exclude `.env` from the package explicitly** (`"!.env"` in electron-builder's `files`). After
   the first build, check with `npx asar list app.asar`.
 - **Store per-user settings outside the app**, in `app.getPath("userData")`, which is
