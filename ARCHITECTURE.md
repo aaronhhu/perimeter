@@ -216,7 +216,7 @@ Edge detection happens as part of debouncing in step 2, so the API receives tran
 
 ## Sessions, focus and notifications
 
-Decided 2026-09-18; not built yet.
+Decided 2026-09-18, revised 2026-11-09. The rule (`sessionAt`) and tables are built; the routes are in progress (see *API surface*).
 
 ### What the signal means
 
@@ -224,8 +224,8 @@ Decided 2026-09-18; not built yet.
 
 ### When a session is active
 
-- **Schedule.** Users set their own hours as blocks per weekday. The backend supports several blocks per day from the start; the MVP website edits one per day, so adding more later is frontend-only. Blocks can't cross midnight, and overlapping blocks are rejected on save (they would double-count scheduled time).
-- **Manual sessions.** Started from the website for a chosen length, and can be ended early. `ends_at = started_at + length`, and it may run past midnight. Ending never requires an action, so forgetting a session is harmless. Only one runs at a time. **A manual session can't be started inside scheduled hours** unless the day is paused (below), because it would only duplicate the schedule. One started outside them may run into a scheduled block; both are "on", so nothing conflicts.
+- **Schedule.** Users set their own hours as blocks per weekday. Several blocks per day, in the backend and on the website. Blocks can't cross midnight, and overlapping blocks are rejected on save (they would double-count scheduled time).
+- **Manual sessions.** Started from the website for a chosen length (5–480 minutes), and can be ended early. **There's no extension:** wanting more means starting a new session after this one ends, so the cap holds per session and a running session's `ends_at` never moves later. `ends_at = started_at + length`, and it may run past midnight. Ending never requires an action, so forgetting a session is harmless. Only one runs at a time. **A manual session can't be started inside scheduled hours** unless the day is paused (below), because it would only duplicate the schedule. One started outside them may run into a scheduled block; both are "on", so nothing conflicts.
 - **Breaks** (website only), and either kind can be ended early. Returning sooner shouldn't be punished.
   - **Short** (15 minutes): pauses whatever is running, schedule or manual. Only available while a session is on. It doesn't extend a manual session's `ends_at`.
   - **Rest of the day** (ends at local midnight): pauses the *schedule* only. It can be taken before the day's hours start (a day off), and it ends any manual session running when it starts. A manual session started *after* it runs normally, and when that session ends the schedule stays paused. That's why starting a session doesn't end a rest-of-day break. Ending the break early brings the schedule back.
@@ -235,9 +235,42 @@ Decided 2026-09-18; not built yet.
 
   This replaces the earlier "latest user action wins", which couldn't express a manual session running on a paused day.
 
+**Worked examples** (Monday block 09:00–17:00), agreed 2026-11-09:
+
+| Case | What happens |
+|---|---|
+| Manual 08:00–09:30 | Allowed (schedule off). The block starts at 09:00 normally; at 09:30 the user is still on, by the schedule, until 17:00. |
+| Start manual at 10:00, no pause | Refused (409): inside scheduled hours. |
+| Pause rest of day at 10:00, manual 10:30–11:30 | Allowed. At 11:30 the schedule stays off until midnight. |
+| Pause rest of day at 07:00 | The 09:00 block never turns on today (a day off). |
+| Short break 09:20 | Off until 09:35, then the schedule resumes. |
+| Pause at 10:00, ended at 11:00 | Schedule back on 11:00–17:00. |
+
 Everything is stored as **time ranges, not a status flag**. Nothing has to run at 9:00 or at the end of a break to flip state, so there are no cron jobs, and whether a session is active at any instant is a pure function of the rows. The same rows answer "how much focus today" for the leaderboard. Timestamps are stored in UTC; the user's timezone lives on the user row and is applied for the schedule and "midnight".
 
 There is **no stored `sessions` table** for scheduled sessions: focus time is computed from events, schedule, manual sessions and breaks. Add a daily rollup if the leaderboard ever gets slow.
+
+**Open, must fix before focus totals or a leaderboard ship: the schedule has no history.** Blocks are a weekly pattern with no dates, and `PUT /schedule` replaces them, so any past day computed later is computed against *today's* schedule. Moving Monday 09:00–17:00 to 13:00–17:00 would erase last Monday's morning credit, and editing the schedule to cover hours when the phone happened to be away would add credit to old days — a leaderboard cheat. Manual sessions and breaks are dated ranges and unaffected. Options weighed 2026-11-09:
+- **Store each finished day's total** (preferred): the daily rollup above, written once a day ends, so past days can't move. Cost: a fix to the focus calculation doesn't reach old days unless they're recomputed deliberately.
+- **Version the blocks** (`effective_from`/`effective_to`; `PUT` closes the current set instead of deleting it): keeps everything computed, but every schedule lookup needs a date.
+
+Until then, anything showing scheduled ranges for a past day draws it with today's schedule.
+
+### API surface
+
+All on `CURRENT_USER_ID` until auth exists. Times are set by the server's clock, never the client's, except schedule wall-clock times.
+
+| Route | Does |
+|---|---|
+| `GET /me`, `PATCH /me` | Timezone (IANA) and `notify_interval_s`. |
+| `GET /schedule`, `PUT /schedule` | The whole week; `PUT` replaces it in one transaction. Overlaps within a weekday are a 400. |
+| `GET /status` | `sessionAt(now)` parts plus the next boundary times. |
+| `POST /sessions` | `{ minutes }`, 5–480. 409 if one is running or the schedule is on and unpaused. |
+| `POST /sessions/current/end` | Ends the running manual session early. 404 if none. |
+| `POST /breaks` | `{ kind }`. Short: 409 unless a session is on. Rest of day: ends any running manual session. 409 if a break is running. |
+| `POST /breaks/current/end` | Ends either kind early. 404 if none. |
+| `POST /heartbeat` | Returns `{ notify }`: on, phone present, and `notify_interval_s` since the last nudge. |
+| `GET /timeline` | Adds scheduled, manual and break ranges for the day. |
 
 ### Dropouts and unknown time
 
