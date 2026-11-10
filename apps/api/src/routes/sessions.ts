@@ -1,13 +1,13 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Router, type Response } from "express";
 import { z } from "zod";
-import type { Tx } from "../contact";
 import { CURRENT_USER_ID } from "../currentUser";
 import { db } from "../db";
 import { lockUser } from "../lock";
-import { breaks, manualSessions } from "../schema";
+import { manualSessions } from "../schema";
 import { sessionAt } from "../session";
-import { loadSessionInputs, type LoadedInputs } from "../sessionInputs";
+import { loadSessionInputs } from "../sessionInputs";
+import { endIdleShortBreaks } from "../shortBreaks";
 import { badRequest } from "./validation";
 
 const MINUTE_MS = 60_000;
@@ -20,17 +20,6 @@ type Refusal = { status: 404 | 409; code: string; error: string };
 const refuse = (res: Response, r: Refusal): void => {
   res.status(r.status).json({ code: r.code, error: r.error });
 };
-
-/**
- * A short break started during a manual session outside the schedule outlives the session if that
- * ends first. Left alone it pauses nothing until it expires — then pauses the next session started
- * inside its 15 minutes. So it's ended whenever the schedule isn't what it's pausing.
- */
-async function endOrphanedShortBreaks(tx: Tx, inputs: LoadedInputs, scheduleOn: boolean, now: Date): Promise<void> {
-  if (scheduleOn) return;
-  const ids = inputs.breaks.filter((b) => b.kind === "short").map((b) => b.id);
-  if (ids.length > 0) await tx.update(breaks).set({ endedAt: now }).where(inArray(breaks.id, ids));
-}
 
 export const sessionsRouter = Router();
 
@@ -56,7 +45,7 @@ sessionsRouter.post("/sessions", async (req, res) => {
       return { status: 409, code: "scheduled_hours", error: "Inside scheduled hours; pause the rest of the day first" };
     }
 
-    await endOrphanedShortBreaks(tx, inputs, false, now);
+    await endIdleShortBreaks(tx, inputs, false, now);
     const [row] = await tx
       .insert(manualSessions)
       .values({ userId: CURRENT_USER_ID, startedAt: now, endsAt: new Date(now.getTime() + parsed.data.minutes * MINUTE_MS) })
@@ -95,7 +84,8 @@ sessionsRouter.post("/sessions/current/end", async (_req, res) => {
     if (row === undefined) throw new Error("UPDATE ... RETURNING produced no row");
 
     const state = sessionAt(now, inputs);
-    await endOrphanedShortBreaks(tx, inputs, state.scheduled && !state.paused, now);
+    // Still pausing the schedule if it's on, so kept; otherwise the session was all it paused.
+    await endIdleShortBreaks(tx, inputs, state.scheduled && !state.paused, now);
     return row;
   });
 
