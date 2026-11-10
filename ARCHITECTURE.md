@@ -228,6 +228,7 @@ Decided 2026-09-18, revised 2026-11-09. The rule (`sessionAt`) and tables are bu
 - **Manual sessions.** Started from the website for a chosen length (5–480 minutes), and can be ended early. **There's no extension:** wanting more means starting a new session after this one ends, so the cap holds per session and a running session's `ends_at` never moves later. `ends_at = started_at + length`, and it may run past midnight. Ending never requires an action, so forgetting a session is harmless. Only one runs at a time. **A manual session can't be started inside scheduled hours** unless the day is paused (below), because it would only duplicate the schedule. One started outside them may run into a scheduled block; both are "on", so nothing conflicts.
 - **Breaks** (website only), and either kind can be ended early. Returning sooner shouldn't be punished.
   - **Short** (15 minutes): pauses whatever is running, schedule or manual. Only available while a session is on. It doesn't extend a manual session's `ends_at`.
+  - **Both at once** (decided 2026-11-09): a short break is allowed during a manual session on a paused day, so a running break only blocks another of the *same* kind. A rest-of-day pause taken during a short break replaces it. Ending a break ends the most recent, which is always the short one, so ending twice steps back out: to the session, then to the schedule.
   - **Rest of the day** (ends at local midnight): pauses the *schedule* only. It can be taken before the day's hours start (a day off), and it ends any manual session running when it starts. A manual session started *after* it runs normally, and when that session ends the schedule stays paused. That's why starting a session doesn't end a rest-of-day break. Ending the break early brings the schedule back.
 - **The rule (decided 2026-11-02):** a session is on at instant *t* when there's no short break at *t*, and either
   - a schedule block covers *t* and no rest-of-day break covers it, or
@@ -269,8 +270,8 @@ All on `CURRENT_USER_ID` until auth exists. Times are set by the server's clock,
 | `GET /status` | `sessionAt(now)` parts plus the next boundary times. |
 | `POST /sessions` | `{ minutes }`, 5–480. 409 `session_running` if one is running; 409 `scheduled_hours` if a block covers now and the day isn't paused (a short break inside a block still counts). |
 | `POST /sessions/current/end` | Ends the running manual session early. 404 `no_session` if none. |
-| `POST /breaks` | `{ kind }`. Short: 409 unless a session is on. Rest of day: ends any running manual session. 409 if a break is running. |
-| `POST /breaks/current/end` | Ends either kind early. 404 if none. |
+| `POST /breaks` | `{ kind }`. Short: 409 `nothing_to_pause` unless the schedule (unpaused) or a manual session is on; 409 `break_running` if a short break is. Rest of day: ends at local midnight (computed in Postgres, DST included), ends any running manual session and short break; 409 `break_running` if the day is already paused. |
+| `POST /breaks/current/end` | Ends the most recent break early. 404 `no_break` if none. |
 | `POST /heartbeat` | Returns `{ notify }`: on, phone present, and `notify_interval_s` since the last nudge. |
 | `GET /timeline` | Adds scheduled, manual and break ranges for the day. |
 

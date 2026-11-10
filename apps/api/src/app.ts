@@ -1,5 +1,6 @@
 import express from "express";
 import { pool } from "./db";
+import { breaksRouter } from "./routes/breaks";
 import { heartbeatRouter } from "./routes/heartbeat";
 import { meRouter } from "./routes/me";
 import { presenceRouter } from "./routes/presence";
@@ -18,6 +19,7 @@ app.use(meRouter);
 app.use(scheduleRouter);
 app.use(statusRouter);
 app.use(sessionsRouter);
+app.use(breaksRouter);
 
 app.get("/health", async (_req, res) => {
   try {
