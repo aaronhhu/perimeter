@@ -258,15 +258,17 @@ Until then, anything showing scheduled ranges for a past day draws it with today
 
 ### API surface
 
-All on `CURRENT_USER_ID` until auth exists. Times are set by the server's clock, never the client's, except schedule wall-clock times.
+All on `CURRENT_USER_ID` until auth exists. Times are set by the server's clock, never the client's, except schedule wall-clock times. Refusals carry a `code` for the website to word, beside `error` for logs. Every session or break change locks the user row first (`lockUser`), so two quick clicks can't both pass the checks.
+
+**Leftover short breaks are ended.** A short break taken during a manual session outside the schedule outlives the session if that's ended early. It would pause nothing, then pause the next session started inside its 15 minutes. So ending a session early ends a running short break unless the schedule is on and unpaused (then the break is still pausing the block), and starting a session ends one too.
 
 | Route | Does |
 |---|---|
 | `GET /me`, `PATCH /me` | Timezone (IANA) and `notify_interval_s`. |
 | `GET /schedule`, `PUT /schedule` | The whole week; `PUT` replaces it in one transaction. Overlaps within a weekday are a 400. |
 | `GET /status` | `sessionAt(now)` parts plus the next boundary times. |
-| `POST /sessions` | `{ minutes }`, 5–480. 409 if one is running or the schedule is on and unpaused. |
-| `POST /sessions/current/end` | Ends the running manual session early. 404 if none. |
+| `POST /sessions` | `{ minutes }`, 5–480. 409 `session_running` if one is running; 409 `scheduled_hours` if a block covers now and the day isn't paused (a short break inside a block still counts). |
+| `POST /sessions/current/end` | Ends the running manual session early. 404 `no_session` if none. |
 | `POST /breaks` | `{ kind }`. Short: 409 unless a session is on. Rest of day: ends any running manual session. 409 if a break is running. |
 | `POST /breaks/current/end` | Ends either kind early. 404 if none. |
 | `POST /heartbeat` | Returns `{ notify }`: on, phone present, and `notify_interval_s` since the last nudge. |

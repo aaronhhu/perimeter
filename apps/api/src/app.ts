@@ -4,6 +4,7 @@ import { heartbeatRouter } from "./routes/heartbeat";
 import { meRouter } from "./routes/me";
 import { presenceRouter } from "./routes/presence";
 import { scheduleRouter } from "./routes/schedule";
+import { sessionsRouter } from "./routes/sessions";
 import { statusRouter } from "./routes/status";
 import { timelineRouter } from "./routes/timeline";
 
@@ -16,6 +17,7 @@ app.use(timelineRouter);
 app.use(meRouter);
 app.use(scheduleRouter);
 app.use(statusRouter);
+app.use(sessionsRouter);
 
 app.get("/health", async (_req, res) => {
   try {
